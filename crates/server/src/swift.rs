@@ -90,6 +90,11 @@ fn check_object(o: &str) -> Result<(), ApiError> {
     if o.is_empty() || o.len() > 1024 {
         return Err(bad("object names are 1–1024 characters"));
     }
+    // URL parsing would resolve "." / ".." segments (encoded or not) and the request would
+    // address another container or account than the one checked.
+    if o.split('/').any(|s| s == "." || s == "..") {
+        return Err(bad("object names can't contain “.” or “..” path segments"));
+    }
     Ok(())
 }
 
@@ -500,6 +505,11 @@ async fn delete_many(
     names: Vec<String>,
 ) -> Result<usize, ApiError> {
     let base = container_url(ctx, container)?;
+    // Names come from the listing; skip the (legal in Swift) ones that can't be addressed safely.
+    let names: Vec<String> = names
+        .into_iter()
+        .filter(|n| check_object(n).is_ok())
+        .collect();
     let mut done = 0;
     for chunk in names.chunks(DELETE_PARALLEL) {
         let mut set = JoinSet::new();
@@ -964,5 +974,8 @@ mod tests {
         assert_eq!(enc_object("a b/c+d/"), "a%20b/c%2Bd/");
         assert_eq!(urlencoding_decode("/v1/AUTH_x/c/a%20b"), "/v1/AUTH_x/c/a b");
         assert!(check_container("a/b").is_err());
+        assert!(check_object("a/../../AUTH_other/c/o").is_err());
+        assert!(check_object("./x").is_err());
+        assert!(check_object("a/..b/.c").is_ok());
     }
 }

@@ -488,6 +488,7 @@ mod tests {
             timeout_ms: 100,
             secret_key: secret.map(Into::into),
             secret_key_file: None,
+            allow_unencrypted: secret.is_none(),
         })
         .unwrap()
     }

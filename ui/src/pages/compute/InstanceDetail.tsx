@@ -603,7 +603,11 @@ function ConsoleTab({ server }: { server: Server }) {
     mutationFn: () =>
       os
         .post<{ remote_console: { url: string } }>("compute", `servers/${server.id}/remote-consoles`, { remote_console: { protocol: "vnc", type: "novnc" } })
-        .then((r) => r.remote_console.url),
+        .then((r) => {
+          // The URL is put in an iframe and a link: only http(s), never javascript: or data:.
+          if (!/^https?:\/\//i.test(r.remote_console.url)) throw new Error(tr("The console address from Nova isn't an http(s) URL."));
+          return r.remote_console.url;
+        }),
   });
   // Ask for a fresh console token when the tab opens (tokens are short-lived).
   useEffect(() => {
@@ -637,7 +641,7 @@ function ConsoleTab({ server }: { server: Server }) {
         <a
           href={url}
           target="_blank"
-          rel="noreferrer"
+          rel="noreferrer noopener"
           aria-disabled={!url}
           className={cn("inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-rack-2 hover:text-white", !url && "pointer-events-none opacity-40")}
         >

@@ -335,13 +335,21 @@ async fn download(ctx: RequestContext, Path(id): Path<String>) -> ApiResult<Resp
             }
         })
         .collect();
-    let ext = img["disk_format"].as_str().unwrap_or("img");
+    let ext: String = img["disk_format"]
+        .as_str()
+        .unwrap_or("img")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(16)
+        .collect();
     let mut out = Response::builder()
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{name}.{ext}\""),
-        );
+        )
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(header::CONTENT_SECURITY_POLICY, "sandbox");
     if let Some(len) = resp.headers().get(header::CONTENT_LENGTH) {
         out = out.header(header::CONTENT_LENGTH, len.clone());
     }

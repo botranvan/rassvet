@@ -3576,6 +3576,7 @@ const vi: Record<string, string> = {
   "the cloud's": "của cloud",
   "The cluster doesn't publish /info, so its features and limits are unknown.": "Cluster không công bố /info, nên không rõ các tính năng và giới hạn của nó.",
   "The connection to Rassvet was lost during the upload.": "Mất kết nối tới Rassvet trong khi tải lên.",
+  "The console address from Nova isn't an http(s) URL.": "Địa chỉ console do Nova trả về không phải là URL http(s).",
   "The console is available while the instance is running (now {toLowerCase}).": "Console chỉ khả dụng khi máy ảo đang chạy (hiện tại: {toLowerCase}).",
   "The console log is empty.": "Log console trống.",
   "The container is empty.": "Container trống.",

@@ -15,6 +15,7 @@ mod nav;
 mod session;
 mod state;
 mod swift;
+mod throttle;
 
 use std::path::PathBuf;
 
@@ -42,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         logging::reopen_on_sighup(file);
     }
     let listen = cfg.server.listen;
+    let secure_cookies = cfg.server.secure_cookies;
     let exts = extensions::registered();
     for e in &exts {
         let m = e.manifest();
@@ -64,10 +66,19 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(|| async { "ok" }))
         .nest("/api", api)
         .fallback(assets::serve)
-        .layer(axum::middleware::map_response(security_headers))
+        .layer(axum::middleware::map_response_with_state(
+            secure_cookies,
+            security_headers,
+        ))
         .layer(middleware::from_fn(logging::request_layer))
         .with_state(st);
 
+    if !secure_cookies && !listen.ip().is_loopback() {
+        tracing::warn!(
+            %listen,
+            "secure_cookies is off: the session cookie is also sent over plain HTTP. Serve Rassvet over HTTPS (directly or behind a TLS proxy) and set [server] secure_cookies = true"
+        );
+    }
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(%listen, version = api::VERSION, "rassvet listening");
     axum::serve(listener, app)
@@ -78,8 +89,32 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn security_headers(mut res: axum::response::Response) -> axum::response::Response {
+async fn security_headers(
+    axum::extract::State(https): axum::extract::State<bool>,
+    mut res: axum::response::Response,
+) -> axum::response::Response {
     let h = res.headers_mut();
+    if https {
+        // Only when served over HTTPS (secure_cookies): browsers then refuse plain HTTP.
+        h.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+    h.insert(
+        "cross-origin-opener-policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    h.insert(
+        "cross-origin-resource-policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    h.insert(
+        "permissions-policy",
+        HeaderValue::from_static(
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+        ),
+    );
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -96,7 +131,7 @@ async fn security_headers(mut res: axum::response::Response) -> axum::response::
             HeaderValue::from_static(
                 "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; \
                  font-src 'self'; connect-src 'self'; frame-src 'self' https: http:; \
-                 frame-ancestors 'none'",
+                 object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
             ),
         );
     }

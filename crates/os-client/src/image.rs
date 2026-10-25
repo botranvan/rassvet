@@ -139,7 +139,10 @@ impl Glance {
             }
             match page.get("next").and_then(Value::as_str) {
                 Some(next) if !next.is_empty() => {
-                    page = self.0.get(&format!("{root}{next}"), &[]).await?;
+                    let url = crate::join_next(&root, next).ok_or_else(|| {
+                        crate::Error::InvalidResponse(format!("unexpected next link {next:?}"))
+                    })?;
+                    page = self.0.get(&url, &[]).await?;
                 }
                 _ => return Ok((out, false)),
             }
@@ -276,7 +279,10 @@ impl Glance {
             }
             match page["next"].as_str() {
                 Some(next) if !next.is_empty() && names.len() < 1000 => {
-                    page = self.0.get(&format!("{root}{next}"), &[]).await?;
+                    let Some(url) = crate::join_next(&root, next) else {
+                        return Ok(names);
+                    };
+                    page = self.0.get(&url, &[]).await?;
                 }
                 _ => return Ok(names),
             }

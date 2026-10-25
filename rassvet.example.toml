@@ -9,7 +9,9 @@ listen = "0.0.0.0:8080"
 session_idle_minutes = 60
 session_max_minutes = 720
 session_cleanup_seconds = 60
-# Enable when served over HTTPS (directly or behind a TLS proxy).
+# Enable when served over HTTPS (directly or behind a TLS proxy): marks the session
+# cookie Secure and sends Strict-Transport-Security. Rassvet warns at startup when it is
+# off and listening on a non-loopback address.
 secure_cookies = false
 
 # Logging. RUST_LOG, when set, overrides `level`.
@@ -30,8 +32,10 @@ max_files = 14            # rotated files kept, oldest deleted (0 = keep all)
 # key_prefix = "rassvet"               # keys look like rassvet:sess:<hash of the cookie>
 # timeout_ms = 500                     # a slow or dead server is skipped for 15 s
 # # Encrypt sessions (they contain Keystone tokens). Same value on every instance, ≥ 16 chars.
+# # Required (one of the two) unless allow_unencrypted = true.
 # secret_key = "change-me-to-a-long-random-string"
 # # secret_key_file = "/etc/rassvet/session.key"
+# # allow_unencrypted = false          # true stores tokens in plain text (not recommended)
 
 # One block per OpenStack cloud the dashboard can log in to.
 [[cloud]]

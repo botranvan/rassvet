@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use axum::{
     Json, Router,
     extract::{Path, Request, State},
-    http::{Method, StatusCode},
+    http::{HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -56,17 +56,45 @@ pub fn router() -> Router<AppState> {
         .route("/placement/capacity", get(crate::compute::capacity))
 }
 
-/// Middleware for `/api/*`: CSRF header check + inject [`RequestContext`] for live sessions.
+/// Whether a state-changing request may come from where the browser says it comes from.
+/// `Sec-Fetch-Site` is set by every current browser and can't be forged by page script;
+/// only the UI's own origin (or no browser context, e.g. curl) is accepted.
+fn cross_site(req: &Request) -> bool {
+    req.headers()
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| !matches!(v, "same-origin" | "none"))
+}
+
+/// Middleware for `/api/*`: CSRF checks + inject [`RequestContext`] for live sessions.
+/// API responses are never cached (they carry secrets: keys, credentials, payloads).
 pub async fn session_layer(
     State(st): State<AppState>,
+    jar: CookieJar,
+    req: Request,
+    next: Next,
+) -> Response {
+    let mut res = session_layer_inner(st, jar, req, next).await;
+    res.headers_mut()
+        .entry(header::CACHE_CONTROL)
+        .or_insert(HeaderValue::from_static("no-store"));
+    res
+}
+
+async fn session_layer_inner(
+    st: AppState,
     jar: CookieJar,
     mut req: Request,
     next: Next,
 ) -> Response {
-    if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
-        && req.headers().get(CSRF_HEADER).is_none()
-    {
-        return ApiError::new(StatusCode::FORBIDDEN, "missing CSRF header").into_response();
+    if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
+        if req.headers().get(CSRF_HEADER).is_none() {
+            return ApiError::new(StatusCode::FORBIDDEN, "missing CSRF header").into_response();
+        }
+        if cross_site(&req) {
+            return ApiError::new(StatusCode::FORBIDDEN, "cross-site request refused")
+                .into_response();
+        }
     }
     if let Some(sid) = jar.get(COOKIE).map(|c| c.value().to_owned())
         && let Some(s) = st.sessions.get(&sid).await
@@ -199,10 +227,60 @@ fn pick_region(
     }
 }
 
+/// `POST /api/auth/login`, with per-account throttling of failed attempts.
 async fn login(
     State(st): State<AppState>,
     jar: CookieJar,
     Json(req): Json<LoginRequest>,
+) -> Response {
+    let key = match &req {
+        LoginRequest::Password {
+            cloud,
+            domain,
+            username,
+            ..
+        } => {
+            let default = st
+                .by_id
+                .get(cloud)
+                .map(|c| c.cfg.default_domain.as_str())
+                .unwrap_or("");
+            let domain = domain.as_deref().filter(|d| !d.trim().is_empty());
+            crate::throttle::password_key(cloud, domain.unwrap_or(default), username)
+        }
+        LoginRequest::ApplicationCredential { cloud, id, .. } => {
+            crate::throttle::app_cred_key(cloud, id)
+        }
+    };
+    if let Some(wait) = st.login_throttle.retry_after(&key) {
+        let mut res = ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many failed sign-ins for this account; try again later",
+        )
+        .into_response();
+        res.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from(wait));
+        return res;
+    }
+    match do_login(&st, jar, req).await {
+        Ok(ok) => {
+            st.login_throttle.success(&key);
+            ok.into_response()
+        }
+        Err(e) => {
+            if e.status == StatusCode::UNAUTHORIZED {
+                st.login_throttle.failure(&key);
+                tracing::info!(account = %key, "sign-in failed");
+            }
+            e.into_response()
+        }
+    }
+}
+
+async fn do_login(
+    st: &AppState,
+    jar: CookieJar,
+    req: LoginRequest,
 ) -> Result<(CookieJar, Json<SessionInfo>), ApiError> {
     let cloud_id = match &req {
         LoginRequest::Password { cloud, .. }
@@ -270,9 +348,20 @@ async fn login(
         prefs: Default::default(),
     };
     tracing::info!(cloud = %s.cloud_id, user = %s.token.user.name, "login");
-    let body = info(&st, &s);
+    // Signing in again from the same browser ends the previous session (and its tokens)
+    // instead of leaving it alive under a cookie the browser no longer sends.
+    if let Some(old) = jar.get(COOKIE).map(|c| c.value().to_owned())
+        && let Some(prev) = st.sessions.remove(&old).await
+        && let Some(c) = st.by_id.get(&prev.cloud_id)
+    {
+        let _ = c.keystone.revoke(&prev.token.value).await;
+        if let Some(u) = &prev.unscoped {
+            let _ = c.keystone.revoke(u).await;
+        }
+    }
+    let body = info(st, &s);
     let id = st.sessions.create(s).await;
-    Ok((jar.add(session_cookie(&st, id)), Json(body)))
+    Ok((jar.add(session_cookie(st, id)), Json(body)))
 }
 
 async fn logout(

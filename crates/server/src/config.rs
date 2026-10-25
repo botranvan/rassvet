@@ -66,6 +66,10 @@ pub struct MemcachedConfig {
     /// Read `secret_key` from a file instead (first line).
     #[serde(default)]
     pub secret_key_file: Option<String>,
+    /// Allow storing sessions (with their Keystone tokens) unencrypted when no secret key
+    /// is set. Off by default: anyone who can read memcached could reuse the tokens.
+    #[serde(default)]
+    pub allow_unencrypted: bool,
 }
 
 fn default_prefix() -> String {
@@ -153,7 +157,12 @@ impl Config {
             }) {
                 bail!("[memcached] servers must be host:port, e.g. \"127.0.0.1:11211\"");
             }
-            m.secret()?;
+            if m.secret()?.is_none() && !m.allow_unencrypted {
+                bail!(
+                    "[memcached] needs secret_key or secret_key_file (sessions hold Keystone tokens); \
+                     set allow_unencrypted = true to store them in plain text anyway"
+                );
+            }
         }
         cfg.log.validate()?;
         Ok(cfg)

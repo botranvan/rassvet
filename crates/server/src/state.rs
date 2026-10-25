@@ -26,6 +26,8 @@ pub struct Inner {
     pub versions: crate::gateway::Versions,
     /// Results of nav policy probes: (cloud, region, user, project, path) → (allowed, when).
     pub probes: std::sync::Mutex<HashMap<String, (bool, std::time::Instant)>>,
+    /// Failed sign-ins per account (brute-force protection).
+    pub login_throttle: crate::throttle::LoginThrottle,
 }
 
 pub type AppState = Arc<Inner>;
@@ -62,5 +64,6 @@ pub fn build(config: Config, extensions: Vec<Arc<dyn Extension>>) -> anyhow::Res
         extensions,
         versions: Default::default(),
         probes: Default::default(),
+        login_throttle: Default::default(),
     }))
 }

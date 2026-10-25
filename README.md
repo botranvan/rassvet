@@ -53,8 +53,9 @@ secret_key_file = "/etc/rassvet/session.key"   # or secret_key = "…" (≥ 16 c
 ```
 
 - Sessions are encrypted with ChaCha20-Poly1305 when a secret key is set (they contain Keystone
-  tokens); keys are a hash of the cookie, so neither appears in memcached. Without a key Rassvet
-  warns at startup and stores them in plain JSON.
+  tokens); keys are a hash of the cookie, so neither appears in memcached. A key is required:
+  without one Rassvet refuses to start, unless `allow_unencrypted = true` (plain JSON, not
+  recommended).
 - Memory stays the fallback: if memcached isn't configured, can't be reached at startup, or fails
   later (per-request timeout, then the server is skipped for 15 s), logins and requests keep
   working from memory. Sessions created meanwhile, or lost by a memcached restart, are written back
@@ -64,6 +65,25 @@ secret_key_file = "/etc/rassvet/session.key"   # or secret_key = "…" (≥ 16 c
   0 = no limit), or the expiry of the Keystone token. The memcached TTL is set to exactly that
   deadline (the idle part is refreshed at most once a minute), and memory is swept every
   `session_cleanup_seconds` (default 60). An expired session found on a request is deleted at once.
+
+### Security
+
+- Run behind HTTPS and set `[server] secure_cookies = true`: the session cookie becomes
+  `Secure` and responses carry `Strict-Transport-Security`. Rassvet warns at startup when it is
+  off on a non-loopback address.
+- The browser holds only an opaque, HttpOnly, SameSite=Strict session cookie; Keystone tokens
+  stay on the server. Changes need the `X-Rassvet-CSRF` header and are refused when the
+  browser reports a cross-site origin (`Sec-Fetch-Site`). API responses are `no-store`.
+- Sign-in is throttled per account: after 10 failed attempts in 15 minutes the account's
+  sign-ins are refused (429, `Retry-After`) until the window ends; a success resets it. Each
+  instance counts on its own; Keystone's own lockout (`[security_compliance]`) still applies.
+- OpenStack calls follow redirects only within the same origin and pagination links only on
+  the same endpoint, so the token is never sent to another host.
+- Object downloads are attachments with `Content-Security-Policy: sandbox`; Swift object
+  names with `.` / `..` segments are refused (they would address another path).
+- Image import from a URL (`web-download`) is fetched by Glance, not Rassvet: restrict it in
+  glance-api.conf (`[import_filtering_opts]` allowed schemes, hosts and ports) so users can't
+  reach internal addresses.
 
 ### Menus follow the cloud's policy
 
