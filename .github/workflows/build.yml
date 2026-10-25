@@ -1,0 +1,171 @@
+# Build Rassvet: UI (Vite) embedded into a single static binary per architecture.
+# - Every push / pull request: typecheck + build the UI, cargo test + clippy, build the binaries.
+# - Tags v*: the same, plus a GitHub release with the archives and SHA256SUMS.
+# The version shown in the UI comes from RASSVET_VERSION (tag without the "v", else "<crate version>-dev.<sha>").
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            base=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -1)
+            v="${base:-0.0.0}-dev.${GITHUB_SHA::7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Rassvet version: $v"
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: ${{ hashFiles('ui/pnpm-lock.yaml') != '' && 'pnpm' || '' }}
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: ui
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi
+      - name: Typecheck and build
+        working-directory: ui
+        run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+      - name: Lockfile flag
+        run: echo "LOCKED=$([ -f Cargo.lock ] && echo --locked)" >> "$GITHUB_ENV"
+      # build.rs creates an empty ui/dist, so tests don't need the UI build.
+      - name: Tests
+        run: cargo test --workspace $LOCKED
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets $LOCKED
+      - name: Build without extensions
+        run: cargo check -p rassvet --no-default-features $LOCKED
+
+  build:
+    needs: [version, ui]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    env:
+      RASSVET_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: ui-dist
+          path: ui/dist
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: |
+          locked=$([ -f Cargo.lock ] && echo --locked || true)
+          cargo build --release -p rassvet --target ${{ matrix.target }} $locked
+      - name: Check the binary
+        run: |
+          bin=target/${{ matrix.target }}/release/rassvet
+          file "$bin"
+          "$bin" --version
+          "$bin" --version | grep -F "$RASSVET_VERSION"
+      - name: Package
+        id: pkg
+        run: |
+          name="rassvet-${RASSVET_VERSION}-linux-${{ matrix.arch }}"
+          mkdir -p "dist/$name"
+          cp target/${{ matrix.target }}/release/rassvet "dist/$name/"
+          for f in rassvet.example.toml README.md LICENSE docs; do
+            [ -e "$f" ] && cp -r "$f" "dist/$name/"
+          done
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: rassvet-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && cat *.sha256 > SHA256SUMS && rm *.sha256 && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Rassvet ${{ needs.version.outputs.version }}
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
