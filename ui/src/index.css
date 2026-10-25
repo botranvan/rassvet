@@ -1,0 +1,153 @@
+@import "tailwindcss";
+@import "@fontsource/be-vietnam-pro/400.css";
+@import "@fontsource/be-vietnam-pro/500.css";
+@import "@fontsource/be-vietnam-pro/600.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Extension UIs live outside ui/; let Tailwind see their class names. */
+@source "../../extensions";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Palette: a datacenter console.
+ *   rack   – graphite of a server rack, used for the login panel and code blocks
+ *   side   – the sidebar: white in the light theme, rack graphite in the dark one
+ *   cable  – patch-cable teal, the single accent (active state, primary action)
+ *   led-*  – status LEDs, reserved for resource state, never decoration
+ */
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --color-rack: #1b2029;
+  --color-rack-2: #232a35;
+  --color-rack-line: #2e3644;
+  --color-rack-ink: #c9d2de;
+  --color-rack-dim: #7d8a9c;
+
+  --color-side: #ffffff;
+  --color-side-line: #e3e8ee;
+  --color-side-ink: #3a4556;
+  --color-side-dim: #7a8798;
+  --color-side-strong: #131a24;
+  --color-side-hover: #f1f4f8;
+  --color-side-well: #eef1f5;
+  --color-side-active: #e3f3f2;
+  --color-side-accent: #0f8b8d;
+  --color-side-admin: #fbefd9;
+  --color-side-admin-ink: #9a6412;
+
+  --color-cable: #0f8b8d;
+  --color-cable-bright: #22b5b0;
+  --color-cable-soft: #e3f3f2;
+
+  --color-led-green: #3dcb7a;
+  --color-led-amber: #e8a33d;
+  --color-led-red: #e5484d;
+
+  --color-surface: #f3f5f8;
+  --color-panel: #ffffff;
+  --color-line: #dde3ea;
+  --color-ink: #18202b;
+  --color-muted: #5d6b7e;
+
+  --animate-pop-in: pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop-in-up: pop-in-up 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop-out: pop-out 110ms ease-in forwards;
+  --animate-fade-in: fade-in 160ms ease-out;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.97);
+    }
+  }
+  @keyframes pop-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.97);
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+@layer base {
+  .dark {
+    --color-rack: #0d1015;
+    --color-rack-2: #151a21;
+    --color-rack-line: #252c37;
+    --color-side: #0d1015;
+    --color-side-line: #252c37;
+    --color-side-ink: #c9d2de;
+    --color-side-dim: #7d8a9c;
+    --color-side-strong: #ffffff;
+    --color-side-hover: rgb(255 255 255 / 0.05);
+    --color-side-well: rgb(0 0 0 / 0.25);
+    --color-side-active: rgb(255 255 255 / 0.07);
+    --color-side-accent: #22b5b0;
+    --color-side-admin: rgb(232 163 61 / 0.2);
+    --color-side-admin-ink: #e8a33d;
+    --color-cable: #22b5b0;
+    --color-cable-soft: #12302f;
+    --color-surface: #12161d;
+    --color-panel: #1a2029;
+    --color-line: #2a323e;
+    --color-ink: #e6ebf2;
+    --color-muted: #93a0b2;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-cable;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Login rack: LEDs power on row by row once, then a few keep blinking as activity. */
+@keyframes led-on {
+  from { opacity: 0.12; }
+  to { opacity: 1; }
+}
+@keyframes led-activity {
+  0%, 100% { opacity: 1; }
+  45% { opacity: 0.25; }
+}
+.led {
+  opacity: 0.12;
+  animation: led-on 240ms ease-out forwards;
+}
+.led-blink {
+  animation:
+    led-on 240ms ease-out forwards,
+    led-activity var(--blink, 1.8s) ease-in-out var(--blink-delay, 2s) infinite;
+}

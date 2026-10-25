@@ -1,0 +1,13 @@
+[package]
+name = "rassvet-ext-api"
+description = "Extension contract for rassvet: manifest, navigation, backend routes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+rassvet-os-client.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true

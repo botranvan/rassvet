@@ -1,0 +1,47 @@
+# rassvet configuration. Copy to rassvet.toml and adjust.
+# Run: rassvet --config rassvet.toml
+
+[server]
+listen = "0.0.0.0:8080"
+# Sessions (in memory and in memcached) are deleted when the first of these is reached:
+# no request for session_idle_minutes, session_max_minutes after login (0 = no limit), or
+# the expiry of the user's Keystone token. Memory is swept every session_cleanup_seconds.
+session_idle_minutes = 60
+session_max_minutes = 720
+session_cleanup_seconds = 60
+# Enable when served over HTTPS (directly or behind a TLS proxy).
+secure_cookies = false
+
+# Logging. RUST_LOG, when set, overrides `level`.
+[log]
+level = "info"            # or a filter, e.g. "rassvet=debug,rassvet::openstack=info"
+format = "text"           # text | json
+stdout = true
+# file = "/var/log/rassvet/rassvet.log"   # directory is created if missing
+rotation = "daily"        # never | hourly | daily | size (never: rotate externally, SIGHUP reopens)
+max_size_mb = 100         # with rotation = "size"
+max_files = 14            # rotated files kept, oldest deleted (0 = keep all)
+
+# Optional: keep login sessions in memcached, so they survive restarts and are shared
+# by several Rassvet instances behind a load balancer. Without this section, or while
+# memcached is unreachable, sessions are kept in memory as before.
+# [memcached]
+# servers = ["127.0.0.1:11211"]        # host:port, one or more
+# key_prefix = "rassvet"               # keys look like rassvet:sess:<hash of the cookie>
+# timeout_ms = 500                     # a slow or dead server is skipped for 15 s
+# # Encrypt sessions (they contain Keystone tokens). Same value on every instance, ≥ 16 chars.
+# secret_key = "change-me-to-a-long-random-string"
+# # secret_key_file = "/etc/rassvet/session.key"
+
+# One block per OpenStack cloud the dashboard can log in to.
+[[cloud]]
+id = "lab"
+name = "Lab cloud"
+auth_url = "https://keystone.example.com:5000/v3"
+# URL put into downloaded openrc / clouds.yaml (defaults to the catalog's public identity endpoint)
+# public_auth_url = "https://keystone.example.com:5000/v3"
+default_domain = "Default"
+interface = "public"          # public | internal | admin
+# default_region = "RegionOne"
+# ca_file = "/etc/ssl/certs/openstack-ca.pem"
+insecure_tls = false

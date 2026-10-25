@@ -1,0 +1,12 @@
+[package]
+name = "rassvet-ext-octavia"
+description = "rassvet extension: Octavia load balancers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rassvet-ext-api.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

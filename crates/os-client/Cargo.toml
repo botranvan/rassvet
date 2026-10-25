@@ -1,0 +1,20 @@
+[package]
+name = "rassvet-os-client"
+description = "OpenStack HTTP client: Keystone auth, service catalog, microversions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true
