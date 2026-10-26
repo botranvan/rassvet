@@ -361,12 +361,50 @@ export function DataTable<T>({
             {tr("Clear")}
           </button>
           <div className="ml-auto flex flex-wrap gap-2">
-            {bulkActions!.map((a) => (
-              <Button key={a.id} className={cn("h-8", a.danger && "text-led-red")} onClick={() => setRunning(a)}>
-                {a.icon && <Icon name={a.icon} />}
-                {a.label}
-              </Button>
-            ))}
+            {bulkActions!.map((a, i) => {
+              if (!a.menu)
+                return (
+                  <Button key={a.id} className={cn("h-8", a.danger && "text-led-red")} onClick={() => setRunning(a)}>
+                    {a.icon && <Icon name={a.icon} />}
+                    {a.label}
+                  </Button>
+                );
+              // Grouped actions: one dropdown, placed where the group first appears.
+              if (bulkActions!.findIndex((b) => b.menu === a.menu) !== i) return null;
+              const group = bulkActions!.filter((b) => b.menu === a.menu);
+              return (
+                <ActionMenu
+                  key={`menu:${a.menu}`}
+                  variant="button"
+                  align="end"
+                  className="h-8 px-3"
+                  label={a.menu}
+                  trigger={
+                    <>
+                      <Icon name="list-checks" />
+                      {a.menu}
+                    </>
+                  }
+                  items={() =>
+                    group.flatMap((b): MenuEntry[] => {
+                      // How many of the selected rows the action applies to, shown on the right.
+                      const n = selectedRows.filter((r) => (b.check?.(r) ?? true) === true).length;
+                      return [
+                        b.divider && "-",
+                        {
+                          label: b.label,
+                          icon: b.icon,
+                          danger: b.danger,
+                          hint: `${n}/${selectedRows.length}`,
+                          disabled: n === 0 ? tr("Not possible for any selected row") : false,
+                          onSelect: () => setRunning(b),
+                        },
+                      ];
+                    })
+                  }
+                />
+              );
+            })}
           </div>
         </div>
       ) : (

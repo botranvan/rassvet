@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
+import { MONOKAI, highlightHcl } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { Button, Icon } from "./ui";
 import { tr } from "@/lib/i18n";
@@ -49,13 +50,39 @@ export function CopyButton({ text, label = tr("Copy"), className }: { text: stri
   );
 }
 
-/** Monospace file preview with copy and download actions. */
-export function CodeBlock({ code, filename }: { code: string; filename?: string }) {
+/**
+ * Monospace file preview with copy and download actions. `language="hcl"` colours
+ * Terraform code with the Monokai theme (copy and download keep the plain text).
+ */
+export function CodeBlock({ code, filename, language }: { code: string; filename?: string; language?: "hcl" }) {
+  const hcl = language === "hcl";
+  const body = useMemo(() => (hcl ? highlightHcl(code) : code), [code, hcl]);
+  // Monokai colours as CSS variables, so the Tailwind classes below can use them.
+  const theme = hcl
+    ? ({ "--mk-bg": MONOKAI.bg, "--mk-bar": MONOKAI.bar, "--mk-line": MONOKAI.line, "--mk-fg": MONOKAI.fg, "--mk-dim": MONOKAI.dim } as CSSProperties)
+    : undefined;
   return (
-    <div className="overflow-hidden rounded-lg border border-rack-line bg-rack">
-      <div className="flex items-center gap-2 border-b border-rack-line px-3 py-2">
-        <span className="font-mono text-xs text-rack-dim">{filename}</span>
-        <div className="ml-auto flex gap-2 [&_button]:h-8 [&_button]:border-rack-line [&_button]:bg-rack-2 [&_button]:text-rack-ink [&_button:hover]:bg-rack-line">
+    <div
+      style={theme}
+      className={cn("overflow-hidden rounded-lg border", hcl ? "border-[var(--mk-line)] bg-[var(--mk-bg)]" : "border-rack-line bg-rack")}
+    >
+      <div className={cn("flex items-center gap-2 border-b px-3 py-2", hcl ? "border-[var(--mk-line)] bg-[var(--mk-bar)]" : "border-rack-line")}>
+        {hcl && (
+          <span className="flex gap-1.5" aria-hidden>
+            <span className="size-2.5 rounded-full bg-[#f92672]" />
+            <span className="size-2.5 rounded-full bg-[#e6db74]" />
+            <span className="size-2.5 rounded-full bg-[#a6e22e]" />
+          </span>
+        )}
+        <span className={cn("font-mono text-xs", hcl ? "text-[var(--mk-dim)]" : "text-rack-dim")}>{filename}</span>
+        <div
+          className={cn(
+            "ml-auto flex gap-2 [&_button]:h-8",
+            hcl
+              ? "[&_button]:border-[var(--mk-line)] [&_button]:bg-[var(--mk-bg)] [&_button]:text-[var(--mk-fg)] [&_button:hover]:bg-[var(--mk-line)]"
+              : "[&_button]:border-rack-line [&_button]:bg-rack-2 [&_button]:text-rack-ink [&_button:hover]:bg-rack-line",
+          )}
+        >
           <CopyButton text={code} />
           {filename && (
             <Button type="button" onClick={() => downloadText(filename, code)}>
@@ -65,8 +92,13 @@ export function CodeBlock({ code, filename }: { code: string; filename?: string 
           )}
         </div>
       </div>
-      <pre className="max-h-96 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed text-rack-ink">
-        <code>{code}</code>
+      <pre
+        className={cn(
+          "max-h-96 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed",
+          hcl ? "text-[var(--mk-fg)] selection:bg-[#49483e]" : "text-rack-ink",
+        )}
+      >
+        <code>{body}</code>
       </pre>
     </div>
   );

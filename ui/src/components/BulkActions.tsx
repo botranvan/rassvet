@@ -23,6 +23,13 @@ export interface BulkAction<T> {
   body?: ReactNode;
   /** Past-tense verb for the summary, e.g. "deleted". */
   past: string;
+  /**
+   * Show the action inside a dropdown button with this label (e.g. "Instance actions")
+   * instead of as its own button. Actions with the same label share one dropdown.
+   */
+  menu?: string;
+  /** In a dropdown: draw a separator before this action. */
+  divider?: boolean;
 }
 
 type RowState = { state: "pending" | "running" | "ok" | "skipped" | "error"; message?: string };

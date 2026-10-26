@@ -269,7 +269,7 @@ export default function Terraform() {
                 </ul>
               )}
               <div className={cn("[&_pre]:max-h-[60vh]")}>
-                <CodeBlock code={result.hcl} filename={`${projectSlug}-main.tf`} />
+                <CodeBlock code={result.hcl} filename={`${projectSlug}-main.tf`} language="hcl" />
               </div>
             </>
           ) : (

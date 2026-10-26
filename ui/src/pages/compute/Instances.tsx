@@ -58,38 +58,109 @@ function CopyIp({ addr, floating }: { addr: string; floating: boolean }) {
   );
 }
 
-/** Bulk power actions shared by the project and admin lists. */
-export function serverBulkActions(): BulkAction<Server>[] {
-  const notLocked = (s: Server) => (s.locked ? "Locked" : true);
+/** States where Nova accepts shelve, and where a hard reboot makes sense. */
+const SHELVABLE = ["ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED"];
+const HARD_REBOOTABLE = [...SHELVABLE, "ERROR", "REBOOT", "HARD_REBOOT"];
+
+/**
+ * Bulk actions shared by the project and admin lists. Power, shelve and lock actions sit
+ * in one "Instance actions" dropdown; Delete keeps its own button. Admins may act on
+ * locked instances (Nova lets them), everyone else gets locked ones skipped.
+ */
+export function serverBulkActions(admin = false): BulkAction<Server>[] {
+  const menu = tr("Instance actions");
+  const notLocked = (s: Server) => (s.locked && !admin ? tr("Locked") : true);
+  const status = (s: Server) => tr("Status is {toLowerCase}", { toLowerCase: serverLabel(s).toLowerCase() });
+  const when = (ok: (s: Server) => boolean) => (s: Server) => (ok(s) ? notLocked(s) : status(s));
   return [
     {
       id: "start",
+      menu,
       label: tr("Start"),
       icon: "play",
       title: tr("Start instances?"),
       past: tr("started"),
-      check: (s) => (s.status === "SHUTOFF" ? true : tr("Status is {toLowerCase}", { toLowerCase: serverLabel(s).toLowerCase() })),
+      check: when((s) => s.status === "SHUTOFF"),
       run: (s) => serverAction(s.id, { "os-start": null }),
     },
     {
       id: "stop",
-      label: tr("Stop"),
+      menu,
+      label: tr("Stop (shut down)"),
       icon: "power",
-      title: tr("Stop instances?"),
+      title: tr("Shut down instances?"),
       past: tr("stopped"),
       body: tr("The guest OS is asked to shut down; Nova powers the instance off if it doesn't within the timeout. Disks are kept."),
-      check: (s) => (s.status !== "ACTIVE" ? tr("Status is {toLowerCase}", { toLowerCase: serverLabel(s).toLowerCase() }) : notLocked(s)),
+      check: when((s) => s.status === "ACTIVE" || s.status === "ERROR"),
       run: (s) => serverAction(s.id, { "os-stop": null }),
     },
     {
       id: "reboot",
-      label: tr("Reboot"),
+      menu,
+      divider: true,
+      label: tr("Soft reboot"),
       icon: "refresh",
       title: tr("Reboot instances?"),
       past: tr("rebooted"),
       body: tr("A soft reboot asks the guest OS to restart."),
-      check: (s) => (s.status !== "ACTIVE" ? tr("Status is {toLowerCase}", { toLowerCase: serverLabel(s).toLowerCase() }) : notLocked(s)),
+      check: when((s) => s.status === "ACTIVE"),
       run: (s) => serverAction(s.id, { reboot: { type: "SOFT" } }),
+    },
+    {
+      id: "hard-reboot",
+      menu,
+      label: tr("Hard reboot"),
+      icon: "rotate-ccw",
+      title: tr("Hard reboot instances?"),
+      past: tr("rebooted"),
+      body: tr("Like pulling the power cord and plugging it back in. Unsaved data in the guests may be lost."),
+      check: when((s) => HARD_REBOOTABLE.includes(s.status)),
+      run: (s) => serverAction(s.id, { reboot: { type: "HARD" } }),
+    },
+    {
+      id: "shelve",
+      menu,
+      divider: true,
+      label: tr("Shelve"),
+      icon: "archive",
+      title: tr("Shelve instances?"),
+      past: tr("shelved"),
+      body: tr("The instances are powered off and their CPU and RAM are given back to the cloud. Volumes and addresses are kept. Unshelve them to run again."),
+      check: when((s) => SHELVABLE.includes(s.status)),
+      run: (s) => serverAction(s.id, { shelve: null }),
+    },
+    {
+      id: "unshelve",
+      menu,
+      label: tr("Unshelve"),
+      icon: "play",
+      title: tr("Unshelve instances?"),
+      past: tr("unshelved"),
+      body: tr("The scheduler picks a host for each instance and starts it again."),
+      check: when((s) => s.status.startsWith("SHELVED")),
+      run: (s) => serverAction(s.id, { unshelve: null }),
+    },
+    {
+      id: "lock",
+      menu,
+      divider: true,
+      label: tr("Lock"),
+      icon: "lock",
+      title: tr("Lock instances?"),
+      past: tr("locked"),
+      body: tr("Locked instances can't be stopped, rebooted, resized or deleted by non-admin users until they are unlocked."),
+      check: (s) => (s.locked ? tr("Already locked") : true),
+      run: (s) => serverAction(s.id, { lock: null }),
+    },
+    {
+      id: "unlock",
+      menu,
+      label: tr("Unlock"),
+      icon: "lock-open",
+      title: tr("Unlock instances?"),
+      past: tr("unlocked"),
+      check: (s) => (s.locked ? true : tr("Not locked")),
+      run: (s) => serverAction(s.id, { unlock: null }),
     },
     {
       id: "delete",
@@ -298,7 +369,7 @@ export default function Instances({ admin = false }: { admin?: boolean }) {
           </Link>
         )}
         empty={admin ? tr("There are no instances in the cloud.") : tr("No instances yet. Launch one to get started.")}
-        bulkActions={serverBulkActions()}
+        bulkActions={serverBulkActions(admin)}
         onRefresh={() => servers.refetch()}
         refreshing={servers.isFetching}
         onBulkDone={() => invalidate("compute", "volume")}
