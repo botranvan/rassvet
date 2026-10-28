@@ -394,8 +394,10 @@ export function QosPolicyDetail({ admin = false }: { admin?: boolean }) {
   const navigate = useNavigate();
   const session = useSession().data!;
   const policy = useOsGet<QosPolicy>("network", `qos/policies/${id}`, (r: { policy: QosPolicy }) => r.policy);
-  const networks = useNetworks({ qos_policy_id: id });
-  const ports = usePorts({ qos_policy_id: id });
+  // Neutron can't filter networks or ports by qos_policy_id (it answers 400), so list
+  // them all, as the policy list does, and pick the ones using this policy here.
+  const networks = useNetworks();
+  const ports = usePorts();
   const projectName = useProjectName(session.is_admin);
   const invalidate = useInvalidate();
   const back = `${admin ? "/admin" : ""}/network/qos`;
@@ -511,6 +513,7 @@ export function QosPolicyDetail({ admin = false }: { admin?: boolean }) {
                   {tr("Apply to network or port")}
                 </Button>
               </div>
+              <ErrorNotice error={networks.error ?? ports.error} className="mb-4" />
               <DataTable
                 rows={networks.isPending || ports.isPending ? undefined : targets}
                 columns={tCols}
