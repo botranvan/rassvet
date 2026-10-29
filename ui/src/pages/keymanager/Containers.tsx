@@ -11,14 +11,16 @@ import { CopyButton, copyText } from "@/components/CodeBlock";
 import { type Column, DataTable } from "@/components/DataTable";
 import { ActionMenu } from "@/components/Menu";
 import { Picker } from "@/components/Picker";
-import { Badge, Button, Card, Detail, ErrorNotice, Field, Icon, Input, Mono, PageHeader, StatusDot, Tabs } from "@/components/ui";
-import { type Secret, type SecretContainer, refId, secretTypeLabel, statusOf, useAllSecrets, useContainer, useOffsetPaged } from "@/lib/barbican";
+import { Badge, Button, Card, Detail, ErrorNotice, Field, Icon, Input, Mono, PageHeader, StatusDot, Tabs, Textarea } from "@/components/ui";
+import { type Secret, type SecretContainer, type SecretType, refId, secretTypeLabel, statusOf, useAllSecrets, useContainer, useOffsetPaged } from "@/lib/barbican";
 import { filters, text } from "@/lib/filters";
 import { fmtDate } from "@/lib/format";
 import { age, os, useInvalidate } from "@/lib/os";
 import { useSession } from "@/lib/session";
 import { useTab } from "@/lib/useTab";
+import { cn } from "@/lib/utils";
 import { AclCard } from "./acl";
+import { payloadFields } from "./Secrets";
 import { tr } from "@/lib/i18n";
 
 const cName = (c: Pick<SecretContainer, "name" | "id">) => c.name || c.id;
@@ -176,30 +178,145 @@ function secretOptions(secrets: (Secret & { id: string })[] | undefined, slot?: 
     }));
 }
 
+/** Where a slot's secret comes from: one already stored, or content pasted here (stored on submit). */
+type Source = { mode: "existing" | "paste"; ref: string; text: string };
+const EMPTY: Source = { mode: "existing", ref: "", text: "" };
+const filled = (s?: Source) => !!s && (s.mode === "existing" ? !!s.ref : s.text.trim() !== "");
+/** Secret type a pasted slot is stored as. */
+const SLOT_SECRET_TYPE: Record<string, SecretType> = {
+  certificate: "certificate",
+  intermediates: "certificate",
+  private_key: "private",
+  public_key: "public",
+  private_key_passphrase: "passphrase",
+};
+const PASTE_HINT: Record<string, string> = {
+  certificate: "-----BEGIN CERTIFICATE-----\n…",
+  intermediates: "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\n…",
+  private_key: "-----BEGIN PRIVATE KEY-----\n…",
+  public_key: "-----BEGIN PUBLIC KEY-----\n…",
+};
+
+function SecretSource({
+  id,
+  value,
+  onChange,
+  slot,
+  secrets,
+  clearable,
+}: {
+  id?: string;
+  value: Source;
+  onChange: (s: Source) => void;
+  slot?: string;
+  secrets: ReturnType<typeof useAllSecrets>;
+  clearable?: boolean;
+}) {
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <div role="radiogroup" className="inline-flex rounded-md border border-line p-0.5 text-xs">
+        {(["existing", "paste"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={value.mode === m}
+            onClick={() => onChange({ ...value, mode: m })}
+            className={cn("rounded px-2 py-0.5", value.mode === m ? "bg-surface font-medium text-ink" : "text-muted hover:text-ink")}
+          >
+            {m === "existing" ? tr("Existing secret") : tr("Paste content")}
+          </button>
+        ))}
+      </div>
+      {value.mode === "existing" ? (
+        <Picker
+          id={id}
+          aria-label={tr("Secret")}
+          value={value.ref}
+          onChange={(v) => onChange({ ...value, ref: v })}
+          clearable={clearable}
+          searchable
+          loading={secrets.isPending}
+          placeholder={tr("Choose a secret")}
+          options={secretOptions(secrets.data, slot)}
+          emptyText={tr("No secrets yet. Paste the content instead.")}
+        />
+      ) : slot === "private_key_passphrase" ? (
+        <Input id={id} type="password" autoComplete="off" value={value.text} onChange={(e) => onChange({ ...value, text: e.target.value })} placeholder={tr("The passphrase")} />
+      ) : (
+        <Textarea
+          id={id}
+          aria-label={tr("Secret content")}
+          rows={slot ? 6 : 3}
+          value={value.text}
+          onChange={(e) => onChange({ ...value, text: e.target.value })}
+          placeholder={(slot && PASTE_HINT[slot]) || tr("The secret value")}
+          className="font-mono text-[12.5px]"
+          spellCheck={false}
+          autoComplete="off"
+        />
+      )}
+    </div>
+  );
+}
+
 function CreateContainerDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const secrets = useAllSecrets();
   const [name, setName] = useState("");
   const [type, setType] = useState<SecretContainer["type"]>("certificate");
-  const [slots, setSlots] = useState<Record<string, string>>({});
-  const [generic, setGeneric] = useState<{ name: string; ref: string }[]>([{ name: "", ref: "" }]);
-  const refs: { name: string; secret_ref: string }[] =
+  const [slots, setSlots] = useState<Record<string, Source>>({});
+  const [generic, setGeneric] = useState<{ name: string; src: Source }[]>([{ name: "", src: EMPTY }]);
+  const entries: { name: string; src: Source; secretType: SecretType }[] =
     type === "generic"
-      ? generic.filter((g) => g.ref).map((g) => ({ name: g.name.trim() || (secrets.data?.find((s) => s.secret_ref === g.ref)?.name ?? "secret"), secret_ref: g.ref }))
-      : SLOTS[type].filter(([k]) => slots[k]).map(([k]) => ({ name: k, secret_ref: slots[k] }));
-  const missing = type === "generic" ? false : SLOTS[type].some(([k, , req]) => req && !slots[k]);
-  const dupNames = type === "generic" && new Set(refs.map((r) => r.name)).size !== refs.length;
+      ? generic
+          .filter((g) => filled(g.src))
+          .map((g) => ({
+            name: g.name.trim() || (g.src.mode === "existing" && secrets.data?.find((s) => s.secret_ref === g.src.ref)?.name) || "secret",
+            src: g.src,
+            secretType: "opaque",
+          }))
+      : SLOTS[type].filter(([k]) => filled(slots[k])).map(([k]) => ({ name: k, src: slots[k], secretType: SLOT_SECRET_TYPE[k] }));
+  const missing = type === "generic" ? false : SLOTS[type].some(([k, , req]) => req && !filled(slots[k]));
+  const dupNames = type === "generic" && new Set(entries.map((r) => r.name)).size !== entries.length;
+  const pasted = entries.filter((e) => e.src.mode === "paste").length;
+  const run = async () => {
+    // Pasted content is stored as new secrets first; if anything fails they're deleted again.
+    const created: string[] = [];
+    try {
+      const base = name.trim() || "container";
+      const refs: { name: string; secret_ref: string }[] = [];
+      for (const e of entries) {
+        if (e.src.mode === "existing") {
+          refs.push({ name: e.name, secret_ref: e.src.ref });
+          continue;
+        }
+        const s = await os.post<{ secret_ref: string }>("key-manager", "secrets", {
+          name: `${base}-${e.name}`,
+          secret_type: e.secretType,
+          ...payloadFields(e.secretType, "text", e.src.text, false, null).body,
+        });
+        created.push(s.secret_ref);
+        refs.push({ name: e.name, secret_ref: s.secret_ref });
+      }
+      return await os.post<{ container_ref: string }>("key-manager", "containers", { name: name.trim() || undefined, type, secret_refs: refs });
+    } catch (err) {
+      await Promise.allSettled(created.map((ref) => os.del("key-manager", `secrets/${refId(ref)}`)));
+      throw err;
+    }
+  };
   return (
     <ActionDialog<{ container_ref: string }>
       onClose={onClose}
       size="md"
       title={tr("Create secret container")}
+      description={pasted ? tr("Pasted content is stored as {n} new secret(s), named after the container.", { n: pasted }) : undefined}
       submitLabel={tr("Create container")}
-      canSubmit={!missing && !dupNames && (type !== "generic" || refs.length > 0)}
+      canSubmit={!missing && !dupNames && (type !== "generic" || entries.length > 0)}
       done={tr("Container created")}
       refresh={["key-manager"]}
       onDone={(r) => navigate(`/key-manager/containers/${refId(r.container_ref)}`)}
-      run={() => os.post("key-manager", "containers", { name: name.trim() || undefined, type, secret_refs: refs })}
+      run={run}
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={tr("Name")}>{(id) => <Input id={id} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tr("www-example-com")} />}</Field>
@@ -221,25 +338,17 @@ function CreateContainerDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-2">
           <p className="text-sm font-medium">{tr("Secrets")}</p>
           {generic.map((g, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Input aria-label={tr("Name in the container")} value={g.name} onChange={(e) => setGeneric((l) => l.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder={tr("name")} className="w-36" />
+            <div key={i} className="flex items-start gap-2">
+              <Input aria-label={tr("Name in the container")} value={g.name} onChange={(e) => setGeneric((l) => l.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder={tr("name")} className="mt-7 w-36" />
               <div className="min-w-0 flex-1">
-                <Picker
-                  aria-label={tr("Secret")}
-                  value={g.ref}
-                  onChange={(v) => setGeneric((l) => l.map((x, j) => (j === i ? { ...x, ref: v } : x)))}
-                  searchable
-                  loading={secrets.isPending}
-                  placeholder={tr("Choose a secret")}
-                  options={secretOptions(secrets.data)}
-                />
+                <SecretSource value={g.src} onChange={(src) => setGeneric((l) => l.map((x, j) => (j === i ? { ...x, src } : x)))} secrets={secrets} />
               </div>
-              <Button aria-label={tr("Remove")} className="h-9 px-2" onClick={() => setGeneric((l) => (l.length > 1 ? l.filter((_, j) => j !== i) : [{ name: "", ref: "" }]))}>
+              <Button aria-label={tr("Remove")} className="mt-7 h-9 px-2" onClick={() => setGeneric((l) => (l.length > 1 ? l.filter((_, j) => j !== i) : [{ name: "", src: EMPTY }]))}>
                 <Icon name="x" />
               </Button>
             </div>
           ))}
-          <Button className="h-8" onClick={() => setGeneric((l) => [...l, { name: "", ref: "" }])}>
+          <Button className="h-8" onClick={() => setGeneric((l) => [...l, { name: "", src: EMPTY }])}>
             <Icon name="plus" />
             {tr("Add a secret")}
           </Button>
@@ -248,19 +357,7 @@ function CreateContainerDialog({ onClose }: { onClose: () => void }) {
       ) : (
         SLOTS[type].map(([k, label, req]) => (
           <Field key={k} label={req ? label : `${label} ${tr("(optional)")}`}>
-            {(id) => (
-              <Picker
-                id={id}
-                value={slots[k] ?? ""}
-                onChange={(v) => setSlots((s) => ({ ...s, [k]: v }))}
-                clearable={!req}
-                searchable
-                loading={secrets.isPending}
-                placeholder={tr("Choose a secret")}
-                options={secretOptions(secrets.data, k)}
-                emptyText={tr("No secrets yet. Store the certificate and key first.")}
-              />
-            )}
+            {(id) => <SecretSource id={id} value={slots[k] ?? EMPTY} onChange={(v) => setSlots((s) => ({ ...s, [k]: v }))} slot={k} secrets={secrets} clearable={!req} />}
           </Field>
         ))
       )}
