@@ -1,0 +1,20 @@
+[package]
+name = "rassvet-ext-magnum"
+description = "rassvet extension: Magnum Kubernetes clusters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+rassvet-ext-api.workspace = true
+rcgen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+wiremock.workspace = true

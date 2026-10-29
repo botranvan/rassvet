@@ -96,7 +96,7 @@ fn filter(level: &str) -> anyhow::Result<EnvFilter> {
         level.to_owned()
     } else {
         format!(
-            "warn,rassvet={level},rassvet_os_client={level},rassvet_ext_api={level},rassvet_ext_octavia={level}"
+            "warn,rassvet={level},rassvet_os_client={level},rassvet_ext_api={level},rassvet_ext_octavia={level},rassvet_ext_magnum={level}"
         )
     };
     EnvFilter::try_new(&spec)

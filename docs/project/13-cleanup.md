@@ -22,6 +22,8 @@ leftovers in your project and lets you remove them in bulk.
 | Long-stopped instances | shut off for long; they still hold vCPUs and RAM | Shelve or Delete |
 | Routers without interfaces | connected to no subnet | Delete |
 | Networks without ports | nothing plugged in (external and shared networks are not listed) | Delete |
+| Failed Kubernetes clusters | Magnum clusters whose create, update or delete failed (when the cloud has Magnum) | Delete |
+| Unused cluster templates | your templates no cluster was created from (when the cloud has Magnum) | Delete |
 
 ## Steps
 

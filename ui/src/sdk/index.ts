@@ -16,7 +16,7 @@ export { registerIcons } from "@/components/icons";
 export { DataTable, type Column, type BulkAction } from "@/components/DataTable";
 export { Dialog, ConfirmDialog } from "@/components/Dialog";
 export { useToast } from "@/components/Toast";
-export { CodeBlock, CopyButton } from "@/components/CodeBlock";
+export { CodeBlock, CopyButton, downloadText } from "@/components/CodeBlock";
 export { lang, tr, trx } from "@/lib/i18n";
 // Gateway helpers: use the service name `ext:<id>` for the extension's own `/api/ext/<id>/os/*` gateway.
 export {
@@ -42,10 +42,19 @@ export {
   useServers,
   portLabel,
   serverIps,
+  serverLabel,
+  serverStatus,
+  // Nova flavors and key pairs (e.g. for forms that start instances through another service)
+  type Flavor,
+  type Keypair,
+  useFlavors,
+  useKeypairs,
 } from "@/lib/os";
+// Glance images a project can boot (its own, accepted shared ones and public ones, active only)
+export { type Image, useBootImages } from "@/lib/image";
 export { fmtDate, fmtBytes } from "@/lib/format";
 export { useProjects } from "@/lib/identity";
-export { useTab } from "@/lib/useTab";
+export { useNewParam, useTab } from "@/lib/useTab";
 export { Link, useNavigate, useInAdmin } from "@/components/Link";
 export { useParams, useSearchParams } from "react-router";
 export { ActionDialog } from "@/components/ActionDialog";

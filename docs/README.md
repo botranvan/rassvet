@@ -8,7 +8,7 @@ Each page starts with the **use case** (who needs it and why), then gives **step
 
 Screenshots were taken against a lab cloud; names, sizes and addresses on your cloud will differ.
 Menu entries only appear when your cloud offers the service (for example, *Object storage* needs Swift or
-Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use it.
+Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) and when your role is allowed to use it.
 
 ## Project guides
 
@@ -28,6 +28,7 @@ Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use i
 | 12 | [API access](project/12-api-access.md) | use the `openstack` CLI, scripts and CI with application credentials |
 | 13 | [Cleanup](project/13-cleanup.md) | find and remove leftovers that waste quota |
 | 14 | [Export to Terraform](project/14-export-to-terraform.md) | turn resources you built by hand into code |
+| 15 | [Kubernetes clusters](project/15-kubernetes-clusters.md) | create a Kubernetes cluster, connect with kubectl, resize and upgrade it |
 
 ## Admin guides
 
@@ -41,6 +42,7 @@ Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use i
 | 6 | [Provider networks](admin/06-provider-networks.md) | create external and shared networks |
 | 7 | [Volume types and storage](admin/07-volume-types-storage.md) | offer storage tiers and watch backend capacity |
 | 8 | [Cleanup across projects](admin/08-cleanup-all-projects.md) | find leftovers in every project |
+| 9 | [Kubernetes service](admin/09-kubernetes-service.md) | publish cluster templates, set cluster quotas, check the Magnum services |
 
 ## Features
 
@@ -112,6 +114,11 @@ Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use i
   pool instead of typing a CIDR, onboard existing subnets.
 - Load balancers (Octavia extension): create a complete load balancer in one dialog (VIP, listener, pool,
   members, health monitor), then manage listeners, L7 policies, pools and members.
+- Kubernetes clusters (Magnum extension, Cluster API driver `magnum-capi-helm`): cluster templates (create,
+  edit, clone, labels with suggestions), clusters (create, resize, upgrade to another template, renew the cloud
+  credentials, delete), node groups (add, change the
+  node count, autoscaler bounds) and a one-click kubeconfig (client certificate signed by the cluster CA, or
+  OpenStack token sign-in), with links to the cluster's servers, network and API load balancer.
 - Object storage (Swift API — OpenStack Swift or Ceph RGW): containers (public or private, storage policy,
   versioning, quotas, metadata), a file browser with folders, drag-and-drop uploads, downloads, properties,
   copy/move and temporary links. EC2 credentials give S3 tools (aws, s3cmd, rclone, boto3) access, with ready
@@ -121,9 +128,9 @@ Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use i
   view, theme, language) and find instances, volumes, networks, routers, security groups and images by name
   or pasted ID.
 - Cleanup: finds unattached volumes, volumes in error, old snapshots, unused floating IPs, detached ports,
-  unused security groups, instances in error or stopped for long, empty routers and networks without ports,
-  and removes them in bulk.
-- Export to Terraform: pick resources and get `main.tf` for the OpenStack provider, with resources you don't
+  unused security groups, instances in error or stopped for long, empty routers, networks without ports,
+  failed Kubernetes clusters and unused cluster templates, and removes them in bulk.
+- Export to Terraform: pick resources (including Kubernetes clusters and templates) and get `main.tf` for the OpenStack provider, with resources you don't
   export looked up by name and optional `import` blocks to adopt what already exists.
 - Overview: quota usage for Nova, Cinder and Neutron.
 - Usage: the project's compute usage over a date range (active instances and RAM, vCPU-, disk GB- and RAM
@@ -159,6 +166,8 @@ Ceph RGW, *Load balancers* needs Octavia) and when your role is allowed to use i
   access page shows only public endpoints).
 - Domains (create, edit, enable/disable, delete) and regions (with parent regions).
 - Cleanup across every project, key manager quotas and object storage accounts of any project.
+- Kubernetes (Magnum): clusters and templates of every project, public / hidden templates, cluster quotas per
+  project, usage and the state of the Magnum services.
 - Federation (SSO): identity providers (remote IDs, domain, authorization TTL) and their protocols (openid,
   saml2, mapped, x509), mappings edited as JSON with templates and validation, Keystone-to-Keystone service
   providers. Rassvet manages federation; signing in to Rassvet itself through SSO is not built yet.

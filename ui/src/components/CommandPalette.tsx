@@ -1,7 +1,8 @@
 /**
  * Command palette (Ctrl/⌘ K): jump to any page, run a quick action (launch, create, switch
  * project / region / view, theme, language, sign out) or find a resource by name or by a
- * pasted UUID (instances, volumes, networks, routers, security groups, images).
+ * pasted UUID (instances, volumes, networks, routers, security groups, images, and Kubernetes
+ * clusters and cluster templates when the Magnum extension is enabled).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -57,14 +58,30 @@ const KINDS: { kind: string; icon: string; svc: "compute" | "volume" | "network"
   { kind: tr("Image"), icon: "disc-3", svc: "image", one: "", path: (id) => `/compute/images/${id}`, get: (id) => `images/${id}` },
 ];
 
+/** Kubernetes clusters and templates (Magnum extension; its gateway is `ext:magnum`). */
+interface MagnumSearch {
+  /** `/ext/magnum` or `/admin/ext/magnum`. */
+  base: string;
+  /** Project view: keep this project's clusters and the templates it can use (Magnum shows admins everything). */
+  project?: string;
+}
+
+type MgRow = { uuid: string; name?: string | null; project_id?: string | null; public?: boolean };
+
+/** Extra search words for the pages of an extension (by nav id prefix), e.g. "k8s" finds Kubernetes. */
+const EXT_KEYWORDS: Record<string, string> = {
+  magnum: "k8s kubernetes magnum container coe cluster",
+  octavia: "lb octavia load balancer balancing listener pool vip",
+};
+
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Resources whose name contains `q` (or whose id is `q`). Each service is asked separately; failures are skipped. */
-function useResourceSearch(q: string, admin: boolean, services: string[]) {
+function useResourceSearch(q: string, admin: boolean, services: string[], magnum?: MagnumSearch) {
   const qc = useQueryClient();
   const has = (t: string[]) => t.some((x) => services.includes(x));
   return useQuery({
-    queryKey: ["palette", admin, q],
+    queryKey: ["palette", admin, q, magnum ?? null],
     enabled: q.length >= 2,
     staleTime: 30_000,
     queryFn: async ({ signal }): Promise<Found[]> => {
@@ -74,10 +91,19 @@ function useResourceSearch(q: string, admin: boolean, services: string[]) {
         for (const r of list.slice(0, 8)) out.push({ kind: k.kind, id: r.id, name: r.name || r.id, path: k.path(r.id), icon: k.icon });
       };
       const usable = KINDS.filter((k) => has(k.svc === "volume" ? ["block-storage", "volumev3", "volume"] : [k.svc]));
+      const mine = (r: MgRow, template: boolean) => !magnum?.project || !r.project_id || r.project_id === magnum.project || (template && !!r.public);
+      const addMg = (template: boolean, list: MgRow[]) => {
+        for (const r of list.filter((x) => mine(x, template)).slice(0, 8))
+          out.push(
+            template
+              ? { kind: tr("Cluster template"), id: r.uuid, name: r.name || r.uuid, path: `${magnum!.base}/templates?edit=${r.uuid}`, icon: "file-code" }
+              : { kind: tr("Kubernetes cluster"), id: r.uuid, name: r.name || r.uuid, path: `${magnum!.base}/clusters/${r.uuid}`, icon: "container" },
+          );
+      };
       if (UUID.test(q)) {
         const id = q.toLowerCase();
-        await Promise.allSettled(
-          usable.map((k) =>
+        await Promise.allSettled([
+          ...usable.map((k) =>
             (k.svc === "image"
               ? api.get<Record<string, { id: string; name?: string }>>(`/image/images/${encodeURIComponent(id)}`, { signal })
               : os.get<Record<string, { id: string; name?: string }>>(k.svc, k.get(id), undefined, { signal })
@@ -86,7 +112,13 @@ function useResourceSearch(q: string, admin: boolean, services: string[]) {
               if (one?.id) add(k, [one]);
             }),
           ),
-        );
+          ...(magnum
+            ? [
+                os.get<MgRow>("ext:magnum", `clusters/${encodeURIComponent(id)}`, undefined, { signal }).then((r) => addMg(false, [r])),
+                os.get<MgRow>("ext:magnum", `clustertemplates/${encodeURIComponent(id)}`, undefined, { signal }).then((r) => addMg(true, [r])),
+              ]
+            : []),
+        ]);
         return out;
       }
       const needle = q.toLowerCase();
@@ -110,6 +142,14 @@ function useResourceSearch(q: string, admin: boolean, services: string[]) {
           add(k, byName(list));
         }
       });
+      if (magnum) {
+        // Magnum can't search names either.
+        const byMgName = (l: MgRow[]) => l.filter((r) => (r.name ?? "").toLowerCase().includes(needle));
+        jobs.push(
+          cached("magnum-clusters", () => os.list<MgRow>("ext:magnum", "clusters/detail", "clusters")).then((l) => addMg(false, byMgName(l))),
+          cached("magnum-templates", () => os.list<MgRow>("ext:magnum", "clustertemplates", "clustertemplates")).then((l) => addMg(true, byMgName(l))),
+        );
+      }
       await Promise.allSettled(jobs);
       return out;
     },
@@ -161,7 +201,10 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
     const t = setTimeout(() => setDebounced(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  const found = useResourceSearch(debounced, admin && session.is_admin, services);
+  const magnumOn = !!nav.data?.extensions.some((e) => e.id === "magnum");
+  const octaviaOn = !!nav.data?.extensions.some((e) => e.id === "octavia");
+  const magnum = magnumOn ? { base: admin && session.is_admin ? "/admin/ext/magnum" : "/ext/magnum", project: admin && session.is_admin ? undefined : session.project?.id } : undefined;
+  const found = useResourceSearch(debounced, admin && session.is_admin, services, magnum);
 
   const done = (f: () => void) => () => {
     onClose();
@@ -179,7 +222,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
         group: tr("Go to"),
         label: tr(i.label),
         hint: i.section === "admin" ? `${tr("Admin")} · ${tr(i.group)}` : tr(i.group),
-        keywords: `${i.label} ${i.group} ${i.section === "admin" ? "admin" : ""}`,
+        keywords: `${i.label} ${i.group} ${i.section === "admin" ? "admin" : ""} ${EXT_KEYWORDS[i.id.split(".")[0]] ?? ""}`,
         icon: i.icon,
         run: done(() => go(i.path)),
       })),
@@ -196,6 +239,9 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       ...create("new-fip", tr("Allocate floating IP"), "globe", "/network/floating-ips?new=1", has("network"), "public address"),
       ...create("new-keypair", tr("Create key pair"), "key-round", "/compute/keypairs?new=1", has("compute"), "ssh"),
       ...create("new-container", tr("Create container"), "archive", "/object-store/containers?new=1", has("object-store"), "bucket swift s3"),
+      ...create("new-lb", tr("Create load balancer"), "split", `${admin && session.is_admin ? "/admin" : ""}/ext/octavia/load-balancers?new=1`, octaviaOn, "lb octavia balancing vip"),
+      ...create("new-k8s", tr("Create Kubernetes cluster"), "container", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/clusters?new=1`, magnumOn, "k8s kubernetes magnum container"),
+      ...create("new-k8s-template", tr("Create cluster template"), "file-code", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/templates?new=1`, magnumOn, "k8s kubernetes magnum container"),
       ...create("terraform", tr("Export to Terraform"), "file-code", "/operations/terraform", true, "hcl iac opentofu"),
       ...(session.is_admin
         ? [{ id: "view", group: tr("Actions"), label: admin ? tr("Switch to project view") : tr("Switch to admin view"), icon: "arrow-right-left", keywords: "mode", run: done(() => go(admin ? "/" : "/admin")) }]
@@ -216,7 +262,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       .filter((r) => r !== session.region)
       .map((r) => ({ id: `region:${r}`, group: tr("Switch region"), label: r, icon: "map-pin", keywords: "region switch", run: done(() => switchRegion.mutate(r)) }));
     return [...pages, ...actions, ...projects, ...regions];
-  }, [nav.data, session, admin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav.data, session, admin, magnumOn, octaviaOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim();
   const results = useMemo(() => {
