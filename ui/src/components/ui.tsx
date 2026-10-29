@@ -405,7 +405,12 @@ export function Tabs<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="tablist" className={cn("flex gap-1 overflow-x-auto border-b border-line", className)}>
+    // The base line is an inset shadow rather than a border so the active tab's underline can cover it without
+    // overflowing the container — overflow-x-auto would otherwise make that 1px overflow scroll vertically.
+    <div
+      role="tablist"
+      className={cn("flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-line)]", className)}
+    >
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -414,7 +419,7 @@ export function Tabs<T extends string>({
           aria-selected={value === t.id}
           onClick={() => onChange(t.id)}
           className={cn(
-            "-mb-px shrink-0 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap text-muted hover:text-ink",
+            "shrink-0 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap text-muted hover:text-ink",
             value === t.id ? "border-cable text-ink" : "border-transparent",
           )}
         >
