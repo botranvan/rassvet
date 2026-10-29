@@ -60,7 +60,7 @@ import {
   useScope,
   useZonesLb,
 } from "./api";
-import { ListenerDialog, PoolDialog, retry409, useMemberTargets } from "./dialogs";
+import { CertificatePicker, ListenerDialog, PoolDialog, retry409, useMemberTargets } from "./dialogs";
 
 /** Floating IPs by port (the VIP port of each load balancer). */
 export function useVipFloatingIps() {
@@ -632,7 +632,7 @@ export function CreateLoadBalancerDialog({ onClose }: { onClose: () => void }) {
               </div>
               {protocol === "TERMINATED_HTTPS" && (
                 <Field label={tr("Certificate (Barbican container or secret)")} hint={tr("PKCS12 secret or certificate container with the server certificate and key.")}>
-                  {(id) => <Input id={id} className="font-mono text-[13px]" value={tlsRef} onChange={(e) => setTlsRef(e.target.value)} placeholder="https://barbican:9311/v1/secrets/…" />}
+                  {(id) => <CertificatePicker id={id} value={tlsRef} onChange={setTlsRef} />}
                 </Field>
               )}
               <p className="text-xs text-muted">{tr("Headers, timeouts, allowed CIDRs and TLS options can be set afterwards on the listener.")}</p>

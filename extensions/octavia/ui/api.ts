@@ -374,6 +374,25 @@ export const useProviders = () => useOsList<Provider>(LB, "lbaas/providers", "pr
 export const useLbStats = (path: string, enabled = true) =>
   useOsGet<Stats>(LB, `${path}/stats`, (r: { stats: Stats }) => r.stats, { enabled });
 
+/** Barbican secrets and containers the TLS fields can reference (the project's own, by full URL). */
+export interface BarbicanSecret {
+  secret_ref: string;
+  name: string | null;
+  secret_type: string;
+  status: string;
+  expiration?: string | null;
+}
+
+export interface BarbicanContainer {
+  container_ref: string;
+  name: string | null;
+  type: "generic" | "certificate" | "rsa";
+  status: string;
+}
+
+export const useBarbicanSecrets = (enabled = true) => useOsList<BarbicanSecret>("key-manager", "secrets", "secrets", undefined, { enabled });
+export const useBarbicanContainers = (enabled = true) => useOsList<BarbicanContainer>("key-manager", "containers", "containers", undefined, { enabled });
+
 /** Delete with Octavia's cascade (a load balancer and everything under it). */
 export const deleteLb = (id: string, cascade: boolean) => os.del(LB, `lbaas/loadbalancers/${id}`, cascade ? { cascade: "true" } : undefined);
 
