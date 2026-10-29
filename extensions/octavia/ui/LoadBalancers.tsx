@@ -27,6 +27,7 @@ import {
   useInAdmin,
   useInvalidate,
   useNavigate,
+  useNewParam,
   useNetworks,
   useOsGet,
   usePorts,
@@ -84,6 +85,7 @@ export default function LoadBalancers() {
   const invalidate = useInvalidate();
   const actions = useLbActions();
   const [creating, setCreating] = useState(false);
+  useNewParam(setCreating);
   const quota = useOsGet<LbQuota>(LB, `lbaas/quotas/${session.data?.project?.id ?? ""}`, (r: { quota: LbQuota }) => r.quota, { enabled: !admin && !!session.data?.project?.id });
 
   const projectName = (id: string) => projects.data?.find((p) => p.id === id)?.name ?? id;

@@ -19,6 +19,8 @@ use axum::{
 use rassvet_os_client::{Catalog, Interface, Token};
 use serde::Serialize;
 
+pub mod gateway;
+
 pub use axum;
 pub use rassvet_os_client as os;
 

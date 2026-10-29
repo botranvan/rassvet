@@ -1,8 +1,8 @@
 /**
  * Cleanup: finds resources that cost quota or money but do nothing — unattached volumes,
  * old snapshots, idle floating IPs, detached ports, unused security groups, instances in
- * ERROR or stopped for long, routers without interfaces, networks without ports — and
- * removes them in bulk. Project view: the current project; admin view: every project.
+ * ERROR or stopped for long, routers without interfaces, networks without ports, failed
+ * Kubernetes clusters and unused cluster templates (Magnum extension) — and removes them in bulk. Project view: the current project; admin view: every project.
  */
 import { type ReactNode, useMemo, useState } from "react";
 import { type BulkAction, type Column, DataTable } from "@/components/DataTable";
@@ -27,7 +27,7 @@ import {
   useInvalidate,
   useOsList,
 } from "@/lib/os";
-import { useSession } from "@/lib/session";
+import { useNav, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { tr } from "@/lib/i18n";
 
@@ -53,6 +53,30 @@ const idle = (days: number, ...iso: (string | null | undefined)[]) => {
 /** Ports that belong to the network itself, not to something using it. */
 const INFRA_OWNERS = new Set(["network:dhcp", "network:distributed"]);
 const ROUTER_IF = new Set(["network:router_interface", "network:router_interface_distributed", "network:ha_router_replicated_interface"]);
+
+/** The Magnum extension's clusters and templates (only the fields the findings need). */
+interface MgCluster {
+  id: string;
+  uuid: string;
+  name: string;
+  status: string;
+  status_reason?: string | null;
+  cluster_template_id: string;
+  master_count: number;
+  node_count: number;
+  project_id?: string;
+  created_at?: string;
+  updated_at?: string | null;
+}
+interface MgTemplate {
+  id: string;
+  uuid: string;
+  name: string;
+  public?: boolean;
+  project_id?: string;
+  created_at?: string;
+}
+const withId = <T extends { uuid: string }>(rows?: T[]) => rows?.map((r) => ({ ...r, id: r.uuid }));
 
 interface Finder {
   id: string;
@@ -100,6 +124,8 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
   const ready = admin || !!pid;
   const net = has("network") && ready;
   const vol = (has("block-storage") || has("volumev3") || has("volume")) && ready;
+  const nav = useNav(true);
+  const mg = !!nav.data?.extensions.some((e) => e.id === "magnum") && ready;
 
   const volumes = useOsList<Volume>("volume", "volumes/detail", "volumes", all, { enabled: vol });
   const snapshots = useOsList<Snapshot>("volume", "snapshots/detail", "snapshots", all, { enabled: vol });
@@ -110,6 +136,9 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
   const sgs = useOsList<SecurityGroup>("network", "security-groups", "security_groups", mine, { enabled: net });
   const routers = useOsList<Router>("network", "routers", "routers", mine, { enabled: net });
   const networks = useOsList<Network>("network", "networks", "networks", mine, { enabled: net });
+  // Magnum shows admins every project's clusters and templates whatever the query.
+  const clusters = useOsList<MgCluster>("ext:magnum", "clusters/detail", "clusters", undefined, { enabled: mg });
+  const templates = useOsList<MgTemplate>("ext:magnum", "clustertemplates", "clustertemplates", undefined, { enabled: mg });
   const projects = useProjects(!!admin);
 
   const projectName = useMemo(() => {
@@ -136,6 +165,8 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
     const sgList = full(sgs);
     // A group referenced by another group's rules (remote group) is in use too.
     for (const g of sgList ?? []) for (const r of g.security_group_rules ?? []) if (r.remote_group_id && r.remote_group_id !== g.id) usedSg.add(r.remote_group_id);
+    const cs = withId(full(clusters))?.filter((c) => admin || c.project_id === pid);
+    const usedTemplates = new Set((full(clusters) ?? []).map((c) => c.cluster_template_id));
     const gwNets = new Set((full(routers) ?? []).map((r) => r.external_gateway_info?.network_id).filter(Boolean) as string[]);
     return {
       snapsOf,
@@ -148,9 +179,11 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
       errorServers: full(errored),
       stoppedServers: full(stopped)?.filter((s) => idle(days, s.updated)),
       emptyRouters: ps && full(routers)?.filter((r) => !routerIfs.has(r.id) && idle(days, r.created_at)),
+      failedClusters: cs?.filter((c) => c.status.endsWith("_FAILED") && idle(days, c.updated_at, c.created_at)),
+      unusedTemplates: cs && withId(full(templates))?.filter((t) => !usedTemplates.has(t.uuid) && (admin ? true : t.project_id === pid) && idle(days, t.created_at)),
       unusedNets: ps && full(networks)?.filter((n) => !n["router:external"] && !(n.shared && !admin) && !busyNet.has(n.id) && !gwNets.has(n.id) && (admin || n.project_id === pid) && idle(days, n.created_at)),
     };
-  }, [volumes, snapshots, ports, sgs, routers, fips, errored, stopped, networks, days, admin, pid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [volumes, snapshots, ports, sgs, routers, fips, errored, stopped, networks, clusters, templates, days, admin, pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------ shared columns
   const projectCol = <T,>(id: (r: T) => string | undefined): Column<T>[] =>
@@ -535,7 +568,88 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
           tr("networks"),
         ),
     },
+    {
+      id: "failed-clusters",
+      icon: "container",
+      title: tr("Failed Kubernetes clusters"),
+      hint: tr("Magnum clusters whose create, update or delete failed. Their servers, volumes and load balancers still count against quota; deleting the cluster removes them too."),
+      count: found.failedClusters?.length,
+      loading: mg && !found.failedClusters,
+      error: clusters.error,
+      table: () =>
+        table(
+          "failed-clusters",
+          found.failedClusters,
+          [
+            {
+              key: "name",
+              header: tr("Name"),
+              cell: (c) => (
+                <Link to={`${admin ? "/admin" : ""}/ext/magnum/clusters/${c.uuid}`} className="truncate font-medium text-cable hover:underline">
+                  {c.name || c.uuid.slice(0, 13)}
+                </Link>
+              ),
+              value: (c) => c.name,
+            },
+            { key: "status", header: tr("Status"), width: "11rem", cell: (c) => <StatusDot status="error" label={c.status} />, value: (c) => `${c.status} ${c.status_reason ?? ""}` },
+            { key: "nodes", header: tr("Nodes"), width: "6rem", cell: (c) => c.master_count + c.node_count, value: (c) => c.master_count + c.node_count },
+            ...projectCol<MgCluster>((c) => c.project_id),
+            ageCol<MgCluster>(tr("Idle for"), (c) => c.updated_at ?? c.created_at),
+          ],
+          (c) => c.name || c.uuid,
+          [
+            {
+              id: "delete",
+              label: tr("Delete"),
+              icon: "trash",
+              danger: true,
+              title: tr("Delete clusters?"),
+              body: tr("Magnum deletes each cluster with the servers, load balancers, networks and volumes it created."),
+              past: tr("deleted"),
+              check: (c) => (c.status === "DELETE_IN_PROGRESS" ? tr("Already being deleted") : true),
+              run: (c) => os.del("ext:magnum", `clusters/${c.uuid}`),
+            },
+          ],
+          refreshAll(clusters),
+          tr("clusters"),
+        ),
+    },
+    {
+      id: "unused-templates",
+      icon: "file-code",
+      title: tr("Unused cluster templates"),
+      hint: tr("Cluster templates no Kubernetes cluster was created from. Public templates of other projects aren't listed."),
+      count: found.unusedTemplates?.length,
+      loading: mg && !found.unusedTemplates,
+      error: templates.error ?? clusters.error,
+      table: () =>
+        table(
+          "unused-templates",
+          found.unusedTemplates,
+          [
+            { key: "name", header: tr("Name"), cell: (t) => <span className="font-medium">{t.name || t.uuid.slice(0, 13)}</span>, value: (t) => t.name },
+            { key: "public", header: tr("Visibility"), width: "8rem", cell: (t) => (t.public ? tr("Public") : tr("Private")), value: (t) => (t.public ? "public" : "private") },
+            ...projectCol<MgTemplate>((t) => t.project_id),
+            ageCol<MgTemplate>(tr("Age"), (t) => t.created_at),
+          ],
+          (t) => t.name || t.uuid,
+          [
+            {
+              id: "delete",
+              label: tr("Delete"),
+              icon: "trash",
+              danger: true,
+              title: tr("Delete cluster templates?"),
+              past: tr("deleted"),
+              run: (t) => os.del("ext:magnum", `clustertemplates/${t.uuid}`),
+            },
+          ],
+          refreshAll(templates, clusters),
+          tr("cluster templates"),
+        ),
+    },
   ].filter((f) => {
+    if (["failed-clusters", "unused-templates"].includes(f.id)) return mg;
     if (["unattached-volumes", "error-volumes", "old-snapshots"].includes(f.id)) return vol;
     if (["error-instances", "stopped-instances"].includes(f.id)) return true;
     return net;
@@ -570,7 +684,7 @@ export default function Cleanup({ admin }: { admin?: boolean }) {
               className="grid size-9 place-items-center rounded-md border border-line bg-panel hover:bg-surface"
               title={tr("Refresh")}
               aria-label={tr("Refresh")}
-              onClick={() => invalidate("compute", "volume", "network")}
+              onClick={() => invalidate("compute", "volume", "network", "ext:magnum")}
             >
               <Icon name="refresh" className={cn("size-4", loading > 0 && "animate-spin")} />
             </button>

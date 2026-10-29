@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { usePref } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -164,6 +164,7 @@ export function DataTable<T>({
   loadingMore,
   onSearch,
   pendingCell,
+  expand,
 }: {
   rows: T[] | undefined;
   columns: Column<T>[];
@@ -195,7 +196,17 @@ export function DataTable<T>({
   onSearch?: (q: string) => void;
   /** First cell of a row whose details are still loading (default: `rowLabel`). */
   pendingCell?: (row: T) => ReactNode;
+  /** Rows get a ▸ toggle that shows this under the row, across all columns. */
+  expand?: (row: T) => ReactNode;
 }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (k: string) =>
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
   const prefix = tableId ? `rassvet.table.${tableId}` : undefined;
   // Tables that filter loaded rows remember their filter and sort per page in the session
   // (paged tables do it in useOsPaged), so coming back to a page shows the same view.
@@ -531,6 +542,11 @@ export function DataTable<T>({
                 />
               </th>
             )}
+            {expand && (
+              <th style={{ width: "2.5rem" }} className="py-2.5 pl-3">
+                <span className="sr-only">{tr("Details")}</span>
+              </th>
+            )}
             {shown.map((c) => (
               <th
                 key={c.key}
@@ -568,6 +584,7 @@ export function DataTable<T>({
             Array.from({ length: 5 }, (_, i) => (
               <tr key={i} className="border-b border-line last:border-0">
                 {selectable && <td className="py-3 pl-4" />}
+                {expand && <td />}
                 {shown.map((c) => (
                   <td key={c.key} className="px-4 py-3">
                     <div
@@ -592,6 +609,7 @@ export function DataTable<T>({
                       <input type="checkbox" disabled aria-label={tr("Select {v}", { v: rowLabel?.(r) ?? k })} className="size-4 accent-cable opacity-40" />
                     </td>
                   )}
+                  {expand && <td />}
                   {shown.map((c, ci) => (
                     <td key={c.key} className={cn("px-4 py-2.5", c.className)}>
                       {ci === 0 ? (
@@ -609,8 +627,10 @@ export function DataTable<T>({
                 </tr>
               );
             }
+            const open = !!expand && expanded.has(k);
             return (
-              <tr key={k} className={cn("border-b border-line last:border-0", isSel ? "bg-cable-soft/40" : "hover:bg-surface/60")}>
+              <Fragment key={k}>
+              <tr className={cn("border-b border-line last:border-0", isSel ? "bg-cable-soft/40" : "hover:bg-surface/60", open && "border-b-0 bg-surface/40")}>
                 {selectable && (
                   <td className="py-2.5 pl-4">
                     <input
@@ -621,6 +641,19 @@ export function DataTable<T>({
                       onClick={(e) => toggleRow(i, e.shiftKey)}
                       className="size-4 accent-cable"
                     />
+                  </td>
+                )}
+                {expand && (
+                  <td className="py-1.5 pl-3">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      aria-label={open ? tr("Hide details of {v}", { v: rowLabel?.(r) ?? k }) : tr("Show details of {v}", { v: rowLabel?.(r) ?? k })}
+                      onClick={() => toggleExpanded(k)}
+                      className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface hover:text-ink"
+                    >
+                      <Icon name="chevron-right" className={cn("size-4 transition-transform", open && "rotate-90")} />
+                    </button>
                   </td>
                 )}
                 {shown.map((c) => {
@@ -646,6 +679,14 @@ export function DataTable<T>({
                   </td>
                 )}
               </tr>
+              {open && (
+                <tr className="border-b border-line bg-surface/40 last:border-0">
+                  <td colSpan={(selectable ? 1 : 0) + 1 + shown.length + (rowActions ? 1 : 0)} className="px-4 pb-3">
+                    {expand(r)}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>

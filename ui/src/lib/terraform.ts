@@ -22,9 +22,60 @@ export interface TfInput {
   keypairs: Keypair[];
   /** Glance images (id + name), to look images up by name. */
   images?: { id: string; name?: string | null }[];
+  /** Magnum cluster templates and clusters (when the Magnum extension is on). */
+  clustertemplates?: TfClusterTemplate[];
+  clusters?: TfCluster[];
 }
 
-export type TfKind = "servers" | "volumes" | "networks" | "routers" | "secgroups" | "fips" | "keypairs";
+/** The Magnum attributes the export writes (see extensions/magnum/ui/api.ts for the full shapes). */
+export interface TfClusterTemplate {
+  uuid: string;
+  name: string;
+  coe: string;
+  image_id: string;
+  keypair_id?: string | null;
+  external_network_id?: string | null;
+  fixed_network?: string | null;
+  fixed_subnet?: string | null;
+  flavor_id?: string | null;
+  master_flavor_id?: string | null;
+  dns_nameserver?: string | null;
+  network_driver?: string | null;
+  driver?: string | null;
+  volume_driver?: string | null;
+  docker_volume_size?: number | null;
+  docker_storage_driver?: string | null;
+  server_type?: string | null;
+  master_lb_enabled?: boolean;
+  floating_ip_enabled?: boolean;
+  tls_disabled?: boolean;
+  public?: boolean;
+  hidden?: boolean;
+  registry_enabled?: boolean;
+  labels?: Record<string, unknown> | null;
+  project_id?: string;
+}
+
+export interface TfCluster {
+  uuid: string;
+  name: string;
+  cluster_template_id: string;
+  keypair?: string | null;
+  master_count: number;
+  node_count: number;
+  flavor_id?: string | null;
+  master_flavor_id?: string | null;
+  docker_volume_size?: number | null;
+  create_timeout?: number;
+  fixed_network?: string | null;
+  fixed_subnet?: string | null;
+  floating_ip_enabled?: boolean | null;
+  master_lb_enabled?: boolean | null;
+  labels?: Record<string, unknown> | null;
+  project_id?: string;
+}
+
+export type TfKind = "servers" | "volumes" | "networks" | "routers" | "secgroups" | "fips" | "keypairs" | "clustertemplates" | "clusters";
 export type TfSelection = Record<TfKind, Set<string>>;
 
 export const emptySelection = (): TfSelection => ({
@@ -35,6 +86,8 @@ export const emptySelection = (): TfSelection => ({
   secgroups: new Set(),
   fips: new Set(),
   keypairs: new Set(),
+  clustertemplates: new Set(),
+  clusters: new Set(),
 });
 
 const T = {
@@ -49,6 +102,8 @@ const T = {
   rule: "openstack_networking_secgroup_rule_v2",
   fip: "openstack_networking_floatingip_v2",
   keypair: "openstack_compute_keypair_v2",
+  clusterTemplate: "openstack_containerinfra_clustertemplate_v1",
+  cluster: "openstack_containerinfra_cluster_v1",
 } as const;
 
 const ROUTER_IF = new Set(["network:router_interface", "network:router_interface_distributed", "network:ha_router_replicated_interface"]);
@@ -98,6 +153,8 @@ export function withDependencies(input: TfInput, sel: TfSelection, projectId: st
     secgroups: new Set(sel.secgroups),
     fips: new Set(sel.fips),
     keypairs: new Set(sel.keypairs),
+    clustertemplates: new Set(sel.clustertemplates),
+    clusters: new Set(sel.clusters),
   };
   const own = (p?: string) => !projectId || p === projectId;
   const netByName = new Map(input.networks.map((n) => [n.name, n]));
@@ -114,6 +171,15 @@ export function withDependencies(input: TfInput, sel: TfSelection, projectId: st
     for (const v of s["os-extended-volumes:volumes_attached"] ?? []) if (input.volumes.some((x) => x.id === v.id)) out.volumes.add(v.id);
     const ports = new Set(input.ports.filter((p) => p.device_id === s.id).map((p) => p.id));
     for (const f of input.fips) if (f.port_id && ports.has(f.port_id) && own(f.project_id)) out.fips.add(f.id);
+  }
+  // A cluster needs its template (when the project owns it) and its key pair.
+  for (const c of (input.clusters ?? []).filter((x) => sel.clusters.has(x.uuid))) {
+    const t = input.clustertemplates?.find((x) => x.uuid === c.cluster_template_id);
+    if (t && own(t.project_id)) out.clustertemplates.add(t.uuid);
+    if (c.keypair && input.keypairs.some((k) => k.name === c.keypair)) out.keypairs.add(c.keypair);
+  }
+  for (const t of (input.clustertemplates ?? []).filter((x) => out.clustertemplates.has(x.uuid))) {
+    if (t.keypair_id && input.keypairs.some((k) => k.name === t.keypair_id)) out.keypairs.add(t.keypair_id);
   }
   return out;
 }
@@ -145,6 +211,8 @@ export function generate(
   const secgroups = input.secgroups.filter((x) => sel.secgroups.has(x.id));
   const fips = input.fips.filter((x) => sel.fips.has(x.id));
   const keypairs = input.keypairs.filter((x) => sel.keypairs.has(x.name));
+  const clusterTemplates = (input.clustertemplates ?? []).filter((x) => sel.clustertemplates.has(x.uuid));
+  const clusters = (input.clusters ?? []).filter((x) => sel.clusters.has(x.uuid));
 
   // Names first, so references work in any order.
   for (const k of keypairs) nm.name(T.keypair, k.name, k.name);
@@ -155,6 +223,8 @@ export function generate(
   for (const v of volumes) nm.name(T.volume, v.id, v.name);
   for (const s of servers) nm.name(T.server, s.id, s.name);
   for (const f of fips) nm.name(T.fip, f.id, f.description || `fip_${f.floating_ip_address.replace(/[.:]/g, "_")}`);
+  for (const t of clusterTemplates) nm.name(T.clusterTemplate, t.uuid, t.name);
+  for (const c of clusters) nm.name(T.cluster, c.uuid, c.name);
 
   const netName = (id: string) => input.networks.find((n) => n.id === id)?.name;
   const subnetName = (id: string) => input.subnets.find((n) => n.id === id)?.name;
@@ -555,6 +625,85 @@ export function generate(
         `# address: ${f.floating_ip_address}`,
       ],
       f.id,
+    );
+  }
+
+  // ---- Magnum (Kubernetes) cluster templates and clusters
+  /** Magnum keeps what it was given: an ID of a visible network, else a name. */
+  const mgNet = (v?: string | null) => (!v ? null : input.networks.some((n) => n.id === v) ? netExpr(v) : str(v));
+  const mgSubnet = (v?: string | null) => (!v ? null : input.subnets.some((n) => n.id === v) ? refText(T.subnet, v) : str(v));
+  const mgKeypair = (v?: string | null) => (!v ? null : nm.get(T.keypair, v) ? `${T.keypair}.${nm.get(T.keypair, v)}.name` : str(v));
+  const mgImage = (v: string) => (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v) ? lookImage(v) : str(v));
+  const labelMap = (l?: Record<string, unknown> | null) => {
+    const m = Object.fromEntries(Object.entries(l ?? {}).map(([k, v]) => [k, String(v)]));
+    return Object.keys(m).length ? map(m) : null;
+  };
+  const bool = (b?: boolean | null) => (b === undefined || b === null ? null : String(b));
+  const num = (n?: number | null) => (n === undefined || n === null ? null : String(n));
+  if (clusterTemplates.length) section("Kubernetes cluster templates (Magnum)");
+  for (const t of clusterTemplates) {
+    const labels = labelMap(t.labels);
+    block(
+      T.clusterTemplate,
+      nm.get(T.clusterTemplate, t.uuid)!,
+      [
+        ...attrs([
+          ["name", str(t.name)],
+          ["coe", str(t.coe)],
+          ["image", mgImage(t.image_id)],
+          ["keypair_id", mgKeypair(t.keypair_id)],
+          ["external_network_id", mgNet(t.external_network_id)],
+          ["fixed_network", mgNet(t.fixed_network)],
+          ["fixed_subnet", mgSubnet(t.fixed_subnet)],
+          ["flavor", t.flavor_id ? str(t.flavor_id) : null],
+          ["master_flavor", t.master_flavor_id ? str(t.master_flavor_id) : null],
+          ["dns_nameserver", t.dns_nameserver ? str(t.dns_nameserver) : null],
+          ["network_driver", t.network_driver ? str(t.network_driver) : null],
+          ["volume_driver", t.volume_driver ? str(t.volume_driver) : null],
+          ["docker_volume_size", num(t.docker_volume_size)],
+          ["docker_storage_driver", t.docker_storage_driver ? str(t.docker_storage_driver) : null],
+          ["server_type", t.server_type ? str(t.server_type) : null],
+          ["master_lb_enabled", bool(t.master_lb_enabled)],
+          ["floating_ip_enabled", bool(t.floating_ip_enabled)],
+          ["tls_disabled", t.tls_disabled ? "true" : null],
+          ["registry_enabled", t.registry_enabled ? "true" : null],
+          ["public", t.public ? "true" : null],
+          ["hidden", t.hidden ? "true" : null],
+        ]),
+        ...(labels ? ["", `labels = ${labels.join("\n  ")}`] : []),
+      ],
+      t.uuid,
+    );
+  }
+  if (clusters.length) section("Kubernetes clusters (Magnum)");
+  for (const c of clusters) {
+    const labels = labelMap(c.labels);
+    const tpl = nm.get(T.clusterTemplate, c.cluster_template_id);
+    const tplName = input.clustertemplates?.find((x) => x.uuid === c.cluster_template_id)?.name;
+    block(
+      T.cluster,
+      nm.get(T.cluster, c.uuid)!,
+      [
+        ...attrs([
+          ["name", str(c.name)],
+          ["cluster_template_id", tpl ? `${T.clusterTemplate}.${tpl}.id` : literal ? `${str(c.cluster_template_id)}${tplName ? ` # ${note(tplName)}` : ""}` : variable("cluster_template", c.cluster_template_id, tplName)],
+          ["master_count", String(c.master_count)],
+          ["node_count", String(c.node_count)],
+          ["keypair", mgKeypair(c.keypair)],
+          ["flavor", c.flavor_id ? str(c.flavor_id) : null],
+          ["master_flavor", c.master_flavor_id ? str(c.master_flavor_id) : null],
+          ["docker_volume_size", num(c.docker_volume_size)],
+          ["create_timeout", num(c.create_timeout)],
+          ["fixed_network", mgNet(c.fixed_network)],
+          ["fixed_subnet", mgSubnet(c.fixed_subnet)],
+          ["floating_ip_enabled", bool(c.floating_ip_enabled)],
+          ["master_lb_enabled", bool(c.master_lb_enabled)],
+        ]),
+        // Magnum returns the cluster's effective labels (template's plus its own).
+        ...(labels ? ["", `labels = ${labels.join("\n  ")}`] : []),
+      ],
+      c.uuid,
+      ["merge_labels", "create_timeout"],
     );
   }
 

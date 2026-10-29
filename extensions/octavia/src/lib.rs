@@ -11,22 +11,25 @@
 use rassvet_ext_api::{
     ApiError, Extension, Manifest, NavItem, NavSection, RequestContext,
     axum::{
-        Json, Router,
+        Router,
         body::Bytes,
         extract::{Path, Query},
-        http::{Method, StatusCode},
-        response::{IntoResponse, Response},
+        http::Method,
+        response::Response,
         routing::any,
     },
-    os,
+    gateway::{self, Rule, Service, admin, rule as r},
 };
-use serde_json::{Value, json};
 
 pub struct Octavia;
 
 const ID: &str = "octavia";
-/// Upper bound of items gathered when following pages.
-const PAGE_CAP: usize = 5000;
+
+const SERVICE: Service = Service {
+    service_type: "load-balancer",
+    version: "v2",
+    microversion: None,
+};
 
 impl Extension for Octavia {
     fn manifest(&self) -> Manifest {
@@ -87,28 +90,6 @@ impl Extension for Octavia {
 }
 
 // ---------------------------------------------------------------------------- rules
-
-struct Rule {
-    method: Method,
-    /// Segments relative to `/v2/`; `{id}` = resource id, `{name}` = provider name.
-    path: &'static str,
-    admin: bool,
-}
-
-const fn r(method: Method, path: &'static str) -> Rule {
-    Rule {
-        method,
-        path,
-        admin: false,
-    }
-}
-const fn admin(method: Method, path: &'static str) -> Rule {
-    Rule {
-        method,
-        path,
-        admin: true,
-    }
-}
 
 use Method as M;
 
@@ -199,155 +180,7 @@ static RULES: &[Rule] = &[
     admin(M::DELETE, "octavia/amphorae/{id}"),
 ];
 
-/// Resource ids: UUIDs (and anything made of the same characters).
-fn valid_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 255
-        && s != "."
-        && s != ".."
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-}
-
-/// Provider and availability zone names.
-fn valid_name(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 255
-        && s != "."
-        && s != ".."
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || " _-.:".contains(c))
-}
-
-fn find_rule(method: &Method, path: &str) -> Option<&'static Rule> {
-    let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
-    RULES.iter().find(|rule| {
-        let pat: Vec<&str> = rule.path.split('/').collect();
-        rule.method == *method
-            && pat.len() == segs.len()
-            && pat.iter().zip(&segs).all(|(p, s)| match *p {
-                "{id}" => valid_id(s),
-                "{name}" => valid_name(s),
-                lit => lit == *s,
-            })
-    })
-}
-
 // ---------------------------------------------------------------------------- calls
-
-/// Octavia API v2 base: the catalog endpoint when it already ends with `/v2` (or `/v2.0`),
-/// otherwise the endpoint plus `/v2` (`…:9876` → `…:9876/v2`, `…/load-balancer` → `…/load-balancer/v2`).
-fn base_url(endpoint: &str) -> String {
-    let e = endpoint.trim_end_matches('/');
-    // Already versioned (`…/v2`, or the `…/v2.0` alias some deployments register): use as is.
-    if e.ends_with("/v2") || e.ends_with("/v2.0") {
-        e.to_owned()
-    } else {
-        format!("{e}/v2")
-    }
-}
-
-fn encode(path: &str) -> String {
-    path.trim_matches('/')
-        .split('/')
-        .map(|s| {
-            s.bytes()
-                .map(|b| match b {
-                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                        (b as char).to_string()
-                    }
-                    _ => format!("%{b:02X}"),
-                })
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-async fn call(
-    ctx: &RequestContext,
-    method: Method,
-    path: &str,
-    query: &[(String, String)],
-    body: Option<&Value>,
-) -> Result<(StatusCode, Value), ApiError> {
-    let url = format!(
-        "{}/{}",
-        base_url(&ctx.endpoint("load-balancer")?),
-        encode(path)
-    );
-    let mut req = ctx
-        .request(method, &url)
-        .header("Accept", "application/json")
-        .query(query);
-    if let Some(b) = body {
-        req = req.json(b);
-    }
-    let resp = os::trace::send("load-balancer", req).await?;
-    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
-    let bytes = resp.bytes().await?;
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-    };
-    Ok((status, value))
-}
-
-/// GET a list and follow `<key>_links` "next" pages with markers, up to [`PAGE_CAP`] items.
-async fn call_all(
-    ctx: &RequestContext,
-    path: &str,
-    query: &[(String, String)],
-) -> Result<Value, ApiError> {
-    let (_, mut first) = call(ctx, Method::GET, path, query, None).await?;
-    let Some(key) = first.as_object().and_then(|o| {
-        o.iter()
-            .find(|(k, v)| v.is_array() && !k.ends_with("_links"))
-            .map(|(k, _)| k.clone())
-    }) else {
-        return Ok(first);
-    };
-    let mut items = first[&key].as_array().cloned().unwrap_or_default();
-    let mut page = first.clone();
-    let mut truncated = false;
-    loop {
-        let has_next = page[format!("{key}_links")]
-            .as_array()
-            .is_some_and(|l| l.iter().any(|x| x["rel"] == "next"));
-        let marker = page[&key]
-            .as_array()
-            .and_then(|a| a.last())
-            .and_then(|l| l["id"].as_str().map(str::to_owned));
-        let (true, Some(marker)) = (has_next, marker) else {
-            break;
-        };
-        if items.len() >= PAGE_CAP {
-            truncated = true;
-            break;
-        }
-        let mut q: Vec<(String, String)> = query
-            .iter()
-            .filter(|(k, _)| k != "marker")
-            .cloned()
-            .collect();
-        q.push(("marker".into(), marker));
-        let (_, next) = call(ctx, Method::GET, path, &q, None).await?;
-        let got = next[&key].as_array().cloned().unwrap_or_default();
-        if got.is_empty() {
-            break;
-        }
-        items.extend(got);
-        page = next;
-    }
-    items.truncate(PAGE_CAP);
-    if let Some(o) = first.as_object_mut() {
-        o.insert(key.clone(), Value::Array(items));
-        o.remove(&format!("{key}_links"));
-        o.insert("truncated".into(), json!(truncated));
-    }
-    Ok(first)
-}
 
 /// `/api/ext/octavia/os/{*path}`
 async fn handle(
@@ -357,51 +190,21 @@ async fn handle(
     Query(raw): Query<Vec<(String, String)>>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let rule = find_rule(&method, &path).ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            format!("{method} load-balancer/{path} is not available in Rassvet"),
-        )
-    })?;
-    if rule.admin && !ctx.is_admin() {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "the admin role is required to use this API",
-        ));
-    }
-    let mut all_pages = false;
-    let mut query = Vec::new();
-    for (k, v) in raw {
-        if k == "all_pages" {
-            all_pages = v == "1" || v == "true";
-        } else {
-            query.push((k, v));
-        }
-    }
-    let body: Option<Value> = if body.is_empty() {
-        None
-    } else {
-        Some(serde_json::from_slice(&body).map_err(|e| {
-            ApiError::new(StatusCode::BAD_REQUEST, format!("invalid JSON body: {e}"))
-        })?)
-    };
-    if method != Method::GET {
-        tracing::info!(user = %ctx.token.user.name, service = "load-balancer", %method, %path, "change");
-    }
-    if all_pages && method == Method::GET {
-        return Ok(Json(call_all(&ctx, &path, &query).await?).into_response());
-    }
-    let (status, value) = call(&ctx, method, &path, &query, body.as_ref()).await?;
-    Ok(if value.is_null() {
-        status.into_response()
-    } else {
-        (status, Json(value)).into_response()
-    })
+    gateway::proxy(&ctx, &SERVICE, RULES, None, method, &path, raw, body).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rassvet_ext_api::gateway::encode;
+
+    fn find_rule(method: &Method, path: &str) -> Option<&'static Rule> {
+        gateway::find_rule(RULES, method, path)
+    }
+
+    fn base_url(endpoint: &str) -> String {
+        SERVICE.base_url(endpoint)
+    }
 
     #[test]
     fn allowlist() {

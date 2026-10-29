@@ -5,6 +5,7 @@ members = [
     "crates/ext-api",
     "crates/server",
     "extensions/octavia",
+    "extensions/magnum",
 ]
 
 [workspace.package]
@@ -17,6 +18,7 @@ rust-version = "1.88"
 rassvet-os-client = { path = "crates/os-client" }
 rassvet-ext-api = { path = "crates/ext-api" }
 rassvet-ext-octavia = { path = "extensions/octavia" }
+rassvet-ext-magnum = { path = "extensions/magnum" }
 
 anyhow = "1"
 base64 = "0.22"
@@ -27,6 +29,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 mime_guess = "2"
 rand = "0.9"
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }

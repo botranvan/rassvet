@@ -15,7 +15,7 @@ contact the owners or clean up yourself.
 2. Choose **Idle for at least** (Any age … 365 days; default 30).
 3. Click a finding card — unattached volumes, volumes in error, old snapshots, unassociated floating IPs,
    detached ports, unused security groups, instances in error, long-stopped instances, routers without
-   interfaces, networks without ports.
+   interfaces, networks without ports, failed Kubernetes clusters and unused cluster templates (with Magnum).
 4. Sort or filter the list by **Project**, export it with the CSV button to send to project owners, or tick
    items and use the bulk action.
 5. Admin extra: for **Volumes in error** a **Force delete** bulk action is available when a normal delete is

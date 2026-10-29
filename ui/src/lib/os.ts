@@ -73,13 +73,24 @@ const PROGRESSIVE = new Set([
 ]);
 const FIRST_PAGE = 25;
 
+/** Overrides the default retry of a query, e.g. for an error a service is known to return for a while. */
+export interface RetryOpts {
+  retry?: (failures: number, error: Error) => boolean;
+  retryDelay?: number;
+}
+
+const retryOpts = (o: RetryOpts) => ({
+  ...(o.retry ? { retry: o.retry } : {}),
+  ...(o.retryDelay !== undefined ? { retryDelay: o.retryDelay } : {}),
+});
+
 /** Shared list hook; `poll` refetches every 4 s while it returns true. `partial` = only the first rows so far. */
 export function useOsList<T>(
   svc: Svc,
   path: string,
   key: string,
   q?: Query,
-  opts: { enabled?: boolean; poll?: (rows: T[]) => boolean } = {},
+  opts: { enabled?: boolean; poll?: (rows: T[]) => boolean } & RetryOpts = {},
 ) {
   const enabled = opts.enabled ?? true;
   const full = useQuery({
@@ -87,6 +98,7 @@ export function useOsList<T>(
     queryFn: () => os.list<T>(svc, path, key, q),
     enabled,
     refetchInterval: (query) => (opts.poll && query.state.data && opts.poll(query.state.data) ? 4000 : false),
+    ...retryOpts(opts),
   });
   const progressive = PROGRESSIVE.has(`${svc} ${path}`) && !q?.limit;
   const first = useQuery({
@@ -336,13 +348,14 @@ export function useOsGet<T>(
   svc: Svc,
   path: string,
   pick: (r: never) => T,
-  opts: { enabled?: boolean; poll?: (v: T) => boolean; q?: Query } = {},
+  opts: { enabled?: boolean; poll?: (v: T) => boolean; q?: Query } & RetryOpts = {},
 ) {
   return useQuery({
     queryKey: ["os", svc, path, opts.q ?? {}],
     queryFn: () => os.get<never>(svc, path, opts.q).then(pick),
     enabled: opts.enabled ?? true,
     refetchInterval: (query) => (opts.poll && query.state.data && opts.poll(query.state.data) ? 4000 : false),
+    ...retryOpts(opts),
   });
 }
 

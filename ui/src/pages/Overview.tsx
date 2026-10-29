@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { type SessionInfo, useNav } from "@/lib/session";
 import { locale, tr, trx } from "@/lib/i18n";
 
-/** Core services the dashboard manages, with every catalog type that maps to them. */
+/** Services the dashboard manages (core and through extensions), with every catalog type that maps to them. */
 const CORE: { name: string; project: string; types: string[]; icon: string }[] = [
   { name: "Identity", project: "Keystone", types: ["identity"], icon: "fingerprint" },
   { name: "Compute", project: "Nova", types: ["compute"], icon: "server" },
@@ -15,6 +15,9 @@ const CORE: { name: string; project: string; types: string[]; icon: string }[] =
   { name: "Block storage", project: "Cinder", types: ["block-storage", "volumev3", "volume"], icon: "hard-drive" },
   { name: "Key manager", project: "Barbican", types: ["key-manager"], icon: "lock-keyhole" },
   { name: "Object storage", project: "Swift", types: ["object-store"], icon: "archive" },
+  // Managed through extensions.
+  { name: "Load balancing", project: "Octavia", types: ["load-balancer"], icon: "split" },
+  { name: "Kubernetes", project: "Magnum", types: ["container-infra"], icon: "container" },
 ];
 
 export default function Overview({ session }: { session: SessionInfo }) {

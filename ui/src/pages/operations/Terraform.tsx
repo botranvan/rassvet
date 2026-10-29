@@ -1,6 +1,6 @@
 /**
  * Export to Terraform: pick instances, volumes, networks, routers, security groups, floating
- * IPs and key pairs of the project and get a main.tf for the OpenStack provider, with import
+ * IPs, key pairs and (with the Magnum extension) Kubernetes clusters and templates of the project and get a main.tf for the OpenStack provider, with import
  * blocks that adopt the existing resources.
  */
 import { useMemo, useState } from "react";
@@ -24,8 +24,8 @@ import {
   useKeypairs,
   useOsList,
 } from "@/lib/os";
-import { useSession } from "@/lib/session";
-import { type TfKind, type TfSelection, emptySelection, generate, withDependencies } from "@/lib/terraform";
+import { useNav, useSession } from "@/lib/session";
+import { type TfCluster, type TfClusterTemplate, type TfKind, type TfSelection, emptySelection, generate, withDependencies } from "@/lib/terraform";
 import { cn } from "@/lib/utils";
 import { tr } from "@/lib/i18n";
 
@@ -113,7 +113,7 @@ function Section({
   );
 }
 
-const KINDS: TfKind[] = ["servers", "volumes", "networks", "routers", "secgroups", "fips", "keypairs"];
+const KINDS: TfKind[] = ["servers", "volumes", "networks", "routers", "secgroups", "fips", "keypairs", "clustertemplates", "clusters"];
 
 export default function Terraform() {
   const session = useSession().data;
@@ -142,6 +142,11 @@ export default function Terraform() {
   const sgs = useOsList<SecurityGroup>("network", "security-groups", "security_groups", mine, { enabled: on });
   const fips = useOsList<FloatingIp>("network", "floatingips", "floatingips", mine, { enabled: on });
   const keypairs = useKeypairs();
+  // Magnum lists every project's clusters and templates to admins: keep this project's.
+  const nav = useNav(true);
+  const magnum = on && !!nav.data?.extensions.some((e) => e.id === "magnum");
+  const mgTemplates = useOsList<TfClusterTemplate>("ext:magnum", "clustertemplates", "clustertemplates", undefined, { enabled: magnum });
+  const mgClusters = useOsList<TfCluster>("ext:magnum", "clusters/detail", "clusters", undefined, { enabled: magnum });
   // Image names, so instances and volumes can find their image by name.
   const images = useImages("all", {}, on && lookups);
   const full = <T,>(q: { data?: T[]; partial?: boolean }) => (q.partial ? undefined : q.data);
@@ -158,8 +163,10 @@ export default function Terraform() {
       fips: full(fips) ?? [],
       keypairs: (keypairs.data ?? []) as Keypair[],
       images: images.data?.images,
+      clustertemplates: mgTemplates.data,
+      clusters: mgClusters.data?.filter((c) => c.project_id === pid),
     }),
-    [servers, volumes, networks, subnets, routers, ports, sgs, fips, keypairs.data, images.data], // eslint-disable-line react-hooks/exhaustive-deps
+    [servers, volumes, networks, subnets, routers, ports, sgs, fips, keypairs.data, images.data, mgTemplates.data, mgClusters.data, pid], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const effective = useMemo(() => (deps ? withDependencies(input, sel, pid) : sel), [deps, input, sel, pid]);
   const result = useMemo(
@@ -203,6 +210,10 @@ export default function Terraform() {
     secgroups: full(sgs)?.map((g) => ({ id: g.id, name: g.name, sub: tr("{n} rules", { n: g.security_group_rules?.length ?? 0 }) })),
     fips: full(fips)?.map((f) => ({ id: f.id, name: f.floating_ip_address, sub: f.fixed_ip_address ? `→ ${f.fixed_ip_address}` : tr("not associated") })),
     keypairs: keypairs.data?.map((k) => ({ id: k.name, name: k.name, sub: k.fingerprint })),
+    clustertemplates: mgTemplates.data
+      ?.filter((t) => t.project_id === pid)
+      .map((t) => ({ id: t.uuid, name: t.name, sub: [t.coe, t.driver ?? "", t.network_driver].filter(Boolean).join(" · ") })),
+    clusters: input.clusters?.map((c) => ({ id: c.uuid, name: c.name, sub: tr("{m} master(s), {n} worker(s)", { m: c.master_count, n: c.node_count }) })),
   };
   const sections: { kind: TfKind; icon: string; title: string; q: { isPending: boolean; error: unknown; partial?: boolean } }[] = [
     { kind: "servers", icon: "server", title: tr("Instances"), q: servers },
@@ -212,6 +223,12 @@ export default function Terraform() {
     { kind: "secgroups", icon: "shield", title: tr("Security groups (with rules)"), q: sgs },
     { kind: "fips", icon: "globe", title: tr("Floating IPs"), q: fips },
     { kind: "keypairs", icon: "key-round", title: tr("Key pairs"), q: keypairs },
+    ...(magnum
+      ? [
+          { kind: "clustertemplates" as const, icon: "file-code", title: tr("Kubernetes cluster templates"), q: mgTemplates },
+          { kind: "clusters" as const, icon: "container", title: tr("Kubernetes clusters"), q: mgClusters },
+        ]
+      : []),
   ];
   const picked = KINDS.reduce((a, k) => a + sel[k].size, 0);
   const projectSlug = (session?.project?.name ?? "project").replace(/[^\w.-]+/g, "-");
