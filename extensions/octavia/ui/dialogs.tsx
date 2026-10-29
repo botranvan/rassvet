@@ -10,10 +10,10 @@ import {
   Field,
   Input,
   MultiPicker,
+  type PickOption,
   Picker,
   Switch,
   Tabs,
-  Textarea,
   os,
   serverIps,
   tr,
@@ -50,6 +50,8 @@ import {
   lbName,
   num,
   splitList,
+  useBarbicanContainers,
+  useBarbicanSecrets,
 } from "./api";
 
 /** Run `fn`, waiting out "immutable" (409) while the load balancer is busy with the previous change. */
@@ -99,6 +101,95 @@ function TextField({ label, value, onChange, hint, placeholder, mono, autoFocus 
   );
 }
 
+// =========================================================================== certificates
+
+const lastSegment = (ref: string) => ref.replace(/\/+$/, "").split("/").pop() ?? ref;
+
+/** Certificate containers and secrets from Barbican as picker options (by full URL); refs not listed are kept. */
+function useCertOptions(keep: string[]): { options: PickOption[]; loading: boolean; failed: boolean } {
+  const containers = useBarbicanContainers();
+  const secrets = useBarbicanSecrets();
+  const options = useMemo(() => {
+    const opts: PickOption[] = [
+      ...(containers.data ?? [])
+        .filter((c) => c.type === "certificate")
+        .map((c) => ({
+          value: c.container_ref,
+          label: c.name || lastSegment(c.container_ref),
+          description: lastSegment(c.container_ref),
+          meta: c.status !== "ACTIVE" ? c.status : undefined,
+          icon: "package",
+          group: tr("Certificate containers"),
+          keywords: c.container_ref,
+        })),
+      ...(secrets.data ?? []).map((x) => ({
+        value: x.secret_ref,
+        label: x.name || lastSegment(x.secret_ref),
+        description: lastSegment(x.secret_ref),
+        meta: x.secret_type,
+        icon: "lock-keyhole",
+        group: tr("Secrets (PKCS12)"),
+        keywords: x.secret_ref,
+      })),
+    ];
+    const known = new Set(opts.map((o) => o.value));
+    const extra = keep.filter((r) => r && !known.has(r)).map((r) => ({ value: r, label: lastSegment(r), description: r, group: tr("Other references") }));
+    return [...extra, ...opts];
+  }, [containers.data, secrets.data, keep]);
+  return { options, loading: containers.isPending || secrets.isPending, failed: !!containers.error && !!secrets.error };
+}
+
+/** Choose a TLS certificate (Barbican certificate container or PKCS12 secret); falls back to typing the URL. */
+export function CertificatePicker({ id, value, onChange, clearable }: { id?: string; value: string; onChange: (v: string) => void; clearable?: boolean }) {
+  const keep = useMemo(() => [value], [value]);
+  const { options, loading, failed } = useCertOptions(keep);
+  const [manual, setManual] = useState(false);
+  if (manual || failed)
+    return (
+      <div className="grid gap-1">
+        <Input id={id} className="font-mono text-[13px]" value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://barbican:9311/v1/secrets/…" />
+        {failed ? (
+          <p className="text-xs text-muted">{tr("Couldn't list Barbican secrets; enter the reference by hand.")}</p>
+        ) : (
+          <button type="button" className="justify-self-start text-xs text-cable hover:underline" onClick={() => setManual(false)}>
+            {tr("Choose from Barbican")}
+          </button>
+        )}
+      </div>
+    );
+  return (
+    <Picker
+      id={id}
+      value={value}
+      onChange={onChange}
+      clearable={clearable}
+      searchable
+      loading={loading}
+      placeholder={tr("Choose a certificate")}
+      emptyText={tr("No certificate containers or secrets in Barbican")}
+      options={options}
+      footer={(close) => (
+        <button
+          type="button"
+          className="w-full rounded px-2 py-1.5 text-left text-xs text-muted hover:bg-surface hover:text-ink"
+          onClick={() => {
+            close();
+            setManual(true);
+          }}
+        >
+          {tr("Enter a reference by hand…")}
+        </button>
+      )}
+    />
+  );
+}
+
+/** Several certificates (SNI) from Barbican. */
+function CertificateMultiPicker({ id, values, onChange }: { id?: string; values: string[]; onChange: (v: string[]) => void }) {
+  const { options, loading } = useCertOptions(values);
+  return <MultiPicker id={id} values={values} onChange={onChange} searchable loading={loading} placeholder={tr("None")} options={options} />;
+}
+
 // =========================================================================== listener
 
 export function ListenerDialog({ lb, listener, pools, onClose, onDone }: { lb: LoadBalancer; listener?: Listener; pools: Pool[]; onClose: () => void; onDone?: (l: Listener) => void }) {
@@ -113,7 +204,7 @@ export function ListenerDialog({ lb, listener, pools, onClose, onDone }: { lb: L
   const [cidrs, setCidrs] = useState((listener?.allowed_cidrs ?? []).join(", "));
   const [headers, setHeaders] = useState<string[]>(Object.entries(listener?.insert_headers ?? {}).filter(([, v]) => v === "true" || v === "True").map(([k]) => k));
   const [tlsRef, setTlsRef] = useState(listener?.default_tls_container_ref ?? "");
-  const [sni, setSni] = useState((listener?.sni_container_refs ?? []).join("\n"));
+  const [sni, setSni] = useState<string[]>(listener?.sni_container_refs ?? []);
   const [clientAuth, setClientAuth] = useState(listener?.client_authentication ?? "NONE");
   const [caRef, setCaRef] = useState(listener?.client_ca_tls_container_ref ?? "");
   const [crlRef, setCrlRef] = useState(listener?.client_crl_container_ref ?? "");
@@ -152,7 +243,7 @@ export function ListenerDialog({ lb, listener, pools, onClose, onDone }: { lb: L
     if (terminated) {
       Object.assign(b, {
         default_tls_container_ref: tlsRef.trim() || null,
-        sni_container_refs: splitList(sni) ?? [],
+        sni_container_refs: sni,
         client_authentication: clientAuth,
         client_ca_tls_container_ref: caRef.trim() || null,
         client_crl_container_ref: crlRef.trim() || null,
@@ -256,16 +347,14 @@ export function ListenerDialog({ lb, listener, pools, onClose, onDone }: { lb: L
       )}
       {tab === "tls" && terminated && (
         <>
-          <TextField
+          <Field
             label={tr("Certificate (Barbican container or secret)")}
-            value={tlsRef}
-            onChange={setTlsRef}
-            mono
-            placeholder="https://barbican:9311/v1/secrets/…"
             hint={tr("PKCS12 secret or certificate container with the server certificate and key. Octavia's service user needs read access to it.")}
-          />
-          <Field label={tr("SNI certificates")} hint={tr("More certificates, chosen by the server name the client asks for. One reference per line.")}>
-            {(id) => <Textarea id={id} rows={2} className="font-mono text-[12.5px]" value={sni} onChange={(e) => setSni(e.target.value)} />}
+          >
+            {(id) => <CertificatePicker id={id} value={tlsRef} onChange={setTlsRef} />}
+          </Field>
+          <Field label={tr("SNI certificates")} hint={tr("More certificates, chosen by the server name the client asks for.")}>
+            {(id) => <CertificateMultiPicker id={id} values={sni} onChange={setSni} />}
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={tr("TLS versions")} hint={tr("Empty = Octavia's default.")}>
