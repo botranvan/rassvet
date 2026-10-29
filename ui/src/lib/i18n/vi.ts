@@ -2513,7 +2513,7 @@ const vi: Record<string, string> = {
   "No secret containers in this project.": "Không có secret container nào trong dự án này.",
   "No secrets in this container.": "Không có secret nào trong container này.",
   "No secrets in this project.": "Không có secret nào trong dự án này.",
-  "No secrets yet. Store the certificate and key first.": "Chưa có secret nào. Hãy lưu chứng chỉ và khóa trước.",
+  "No secrets yet. Paste the content instead.": "Chưa có secret nào. Hãy dán nội dung thay thế.",
   "No security groups (all traffic blocked)": "Không có nhóm bảo mật (chặn mọi lưu lượng)",
   "No security groups.": "Không có nhóm bảo mật.",
   "No server groups. Create one, then pick it when launching instances.": "Chưa có nhóm máy ảo nào. Hãy tạo một nhóm, rồi chọn nhóm đó khi khởi tạo máy ảo.",
@@ -4171,6 +4171,11 @@ const vi: Record<string, string> = {
   "“{v}” isn't a valid hint name": "“{v}” không phải là tên hint hợp lệ",
   "…and its prefix, e.g. /24": "…và prefix của nó, ví dụ /24",
   "…or paste the project ID": "…hoặc dán ID dự án",
+  "Existing secret": "Secret có sẵn",
+  "Paste content": "Dán nội dung",
+  "The passphrase": "Passphrase",
+  "Secret content": "Nội dung secret",
+  "Pasted content is stored as {n} new secret(s), named after the container.": "Nội dung đã dán được lưu thành {n} secret mới, đặt tên theo container.",
 };
 
 export default vi;
