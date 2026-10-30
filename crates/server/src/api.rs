@@ -1,4 +1,7 @@
-//! Core JSON API: clouds, login/logout, session, project/region switching, navigation.
+//! Core JSON API: clouds, login/logout, session, cloud/project/region switching, navigation.
+//!
+//! A session can be signed in to several clouds at once (`POST /session/clouds` adds one);
+//! each request names its cloud, so switching clouds needs no new sign-in.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -8,7 +11,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use axum_extra::extract::{
     CookieJar,
@@ -21,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     nav,
-    session::{COOKIE, Session},
+    session::{COOKIE, CloudLogin, Session},
     state::AppState,
 };
 
@@ -29,12 +32,20 @@ use crate::{
 /// the SameSite=Strict cookie).
 pub const CSRF_HEADER: &str = "x-rassvet-csrf";
 
+/// Header naming the cloud of a request: each browser tab works on one of the session's clouds.
+pub const CLOUD_HEADER: &str = "x-rassvet-cloud";
+/// Query parameter doing the same for plain links (downloads), which can't send headers.
+const CLOUD_PARAM: &str = "rassvet_cloud";
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/clouds", get(clouds))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/session", get(session))
+        .route("/session/clouds", post(add_cloud))
+        .route("/session/clouds/{cloud}", delete(sign_out_cloud))
+        .route("/session/cloud", post(switch_cloud))
         .route("/session/project", post(switch_project))
         .route("/session/region", post(switch_region))
         .route("/session/prefs/{key}", put(put_pref))
@@ -96,25 +107,75 @@ async fn session_layer_inner(
                 .into_response();
         }
     }
+    let requested = requested_cloud(&mut req);
     if let Some(sid) = jar.get(COOKIE).map(|c| c.value().to_owned())
         && let Some(s) = st.sessions.get(&sid).await
-        && let Some(cloud) = st.by_id.get(&s.cloud_id)
     {
-        req.extensions_mut().insert(RequestContext {
-            cloud_id: cloud.cfg.id.clone(),
-            auth_url: cloud.cfg.auth_url.clone(),
-            http: cloud.http.clone(),
-            token: s.token.clone(),
-            region: s.region.clone(),
-            interface: cloud.cfg.interface,
-        });
+        // A request for a cloud this session isn't signed in to gets no context (401),
+        // never another cloud's: the tab's cached ids and names belong to that cloud.
+        let cloud_id = requested.unwrap_or_else(|| s.active.clone());
+        if let Some(login) = s.logins.get(&cloud_id)
+            && let Some(cloud) = st.by_id.get(&cloud_id)
+        {
+            req.extensions_mut().insert(RequestContext {
+                cloud_id: cloud.cfg.id.clone(),
+                auth_url: cloud.cfg.auth_url.clone(),
+                http: cloud.http.clone(),
+                token: login.token.clone(),
+                region: login.region.clone(),
+                interface: cloud.cfg.interface,
+            });
+        }
         req.extensions_mut().insert(SessionId(sid));
+        req.extensions_mut().insert(SelectedCloud(cloud_id));
     }
     next.run(req).await
 }
 
+/// The cloud a request is for: the `X-Rassvet-Cloud` header the UI sends from each tab, or
+/// `?rassvet_cloud=` on plain links (downloads), which is removed before routing.
+fn requested_cloud(req: &mut Request) -> Option<String> {
+    if let Some(v) = req.headers().get(CLOUD_HEADER) {
+        return v.to_str().ok().map(str::to_owned);
+    }
+    let query = req.uri().query()?;
+    let mut found = None;
+    let rest: Vec<&str> = query
+        .split('&')
+        .filter(|kv| {
+            match kv
+                .strip_prefix(CLOUD_PARAM)
+                .and_then(|v| v.strip_prefix('='))
+            {
+                Some(v) => {
+                    found = Some(v.to_owned());
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect();
+    let found = found?;
+    let path = req.uri().path();
+    let pq = match rest.is_empty() {
+        true => path.to_owned(),
+        false => format!("{path}?{}", rest.join("&")),
+    };
+    let mut parts = req.uri().clone().into_parts();
+    parts.path_and_query = pq.parse().ok();
+    if let Ok(uri) = axum::http::Uri::from_parts(parts) {
+        *req.uri_mut() = uri;
+    }
+    Some(found)
+}
+
 #[derive(Clone)]
 pub struct SessionId(pub String);
+
+/// The cloud the request is for (see [`requested_cloud`]), whether or not the session is
+/// signed in to it.
+#[derive(Clone)]
+pub struct SelectedCloud(pub String);
 
 fn sid(req_sid: Option<axum::Extension<SessionId>>) -> Result<String, ApiError> {
     req_sid
@@ -180,28 +241,57 @@ pub struct SessionInfo {
     projects: Vec<ProjectRef>,
     services: Vec<String>,
     can_switch_project: bool,
+    /// Every cloud this session is signed in to (`cloud` is one of them).
+    clouds: Vec<SignedInCloud>,
     prefs: BTreeMap<String, serde_json::Value>,
     /// Rassvet's own version, shown in the UI.
     version: &'static str,
 }
 
-fn info(st: &AppState, s: &Session) -> SessionInfo {
-    let cloud = &st.by_id[&s.cloud_id].cfg;
+#[derive(Serialize)]
+struct SignedInCloud {
+    id: String,
+    name: String,
+    user: ProjectRef,
+    project: Option<ProjectRef>,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+fn cloud_name(st: &AppState, id: &str) -> String {
+    st.by_id
+        .get(id)
+        .map_or_else(|| id.to_owned(), |c| c.cfg.name.clone())
+}
+
+/// The session as seen from `cloud_id`, which must be one of its clouds.
+fn info(st: &AppState, s: &Session, cloud_id: &str) -> SessionInfo {
+    let l = &s.logins[cloud_id];
     SessionInfo {
         cloud: IdName {
-            id: cloud.id.clone(),
-            name: cloud.name.clone(),
+            id: cloud_id.to_owned(),
+            name: cloud_name(st, cloud_id),
         },
-        user: s.token.user.clone(),
-        project: s.token.project.clone(),
-        roles: s.token.roles.clone(),
-        is_admin: s.token.has_role("admin"),
-        expires_at: s.token.expires_at,
-        region: s.region.clone(),
-        regions: s.token.catalog.regions(),
-        projects: s.projects.clone(),
-        services: s.token.catalog.service_types(s.region.as_deref()),
-        can_switch_project: s.unscoped.is_some(),
+        user: l.token.user.clone(),
+        project: l.token.project.clone(),
+        roles: l.token.roles.clone(),
+        is_admin: l.token.has_role("admin"),
+        expires_at: l.token.expires_at,
+        region: l.region.clone(),
+        regions: l.token.catalog.regions(),
+        projects: l.projects.clone(),
+        services: l.token.catalog.service_types(l.region.as_deref()),
+        can_switch_project: l.unscoped.is_some(),
+        clouds: s
+            .logins
+            .iter()
+            .map(|(id, l)| SignedInCloud {
+                id: id.clone(),
+                name: cloud_name(st, id),
+                user: l.token.user.clone(),
+                project: l.token.project.clone(),
+                expires_at: l.token.expires_at,
+            })
+            .collect(),
         prefs: s.prefs.clone(),
         version: VERSION,
     }
@@ -227,12 +317,77 @@ fn pick_region(
     }
 }
 
-/// `POST /api/auth/login`, with per-account throttling of failed attempts.
+/// Best effort: revoke a cloud's tokens so they can't be reused.
+async fn revoke(st: &AppState, cloud_id: &str, l: &CloudLogin) {
+    if let Some(c) = st.by_id.get(cloud_id) {
+        let _ = c.keystone.revoke(&l.token.value).await;
+        if let Some(u) = &l.unscoped {
+            let _ = c.keystone.revoke(u).await;
+        }
+    }
+}
+
+/// `POST /api/auth/login`: a new session signed in to one cloud. Signing in again from the
+/// same browser ends the previous session (and its tokens) instead of leaving it alive
+/// under a cookie the browser no longer sends.
 async fn login(
     State(st): State<AppState>,
     jar: CookieJar,
     Json(req): Json<LoginRequest>,
 ) -> Response {
+    let (cloud_id, login) = match sign_in(&st, req).await {
+        Ok(ok) => ok,
+        Err(res) => return *res,
+    };
+    if let Some(old) = jar.get(COOKIE).map(|c| c.value().to_owned())
+        && let Some(prev) = st.sessions.remove(&old).await
+    {
+        for (id, l) in &prev.logins {
+            revoke(&st, id, l).await;
+        }
+    }
+    let s = Session::new(cloud_id.clone(), login);
+    let body = info(&st, &s, &cloud_id);
+    let id = st.sessions.create(s).await;
+    (jar.add(session_cookie(&st, id)), Json(body)).into_response()
+}
+
+/// `POST /api/session/clouds` (same body as login): sign this session in to one more cloud,
+/// or again to one it has (e.g. as another user), which becomes the active cloud.
+async fn add_cloud(
+    State(st): State<AppState>,
+    sid_ext: Option<axum::Extension<SessionId>>,
+    Json(req): Json<LoginRequest>,
+) -> Response {
+    let id = match sid(sid_ext) {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
+    let (cloud_id, login) = match sign_in(&st, req).await {
+        Ok(ok) => ok,
+        Err(res) => return *res,
+    };
+    let mut replaced = None;
+    let updated = st
+        .sessions
+        .update(&id, |s| {
+            replaced = s.logins.insert(cloud_id.clone(), login.clone());
+            s.active = cloud_id.clone();
+        })
+        .await;
+    let Some(s) = updated else {
+        // The session ended meanwhile: don't leave the new tokens behind.
+        revoke(&st, &cloud_id, &login).await;
+        return ApiError::new(StatusCode::UNAUTHORIZED, "session expired").into_response();
+    };
+    if let Some(old) = &replaced {
+        revoke(&st, &cloud_id, old).await;
+    }
+    Json(info(&st, &s, &cloud_id)).into_response()
+}
+
+/// Authenticate to one cloud, with per-account throttling of failed attempts.
+async fn sign_in(st: &AppState, req: LoginRequest) -> Result<(String, CloudLogin), Box<Response>> {
     let key = match &req {
         LoginRequest::Password {
             cloud,
@@ -260,28 +415,25 @@ async fn login(
         .into_response();
         res.headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from(wait));
-        return res;
+        return Err(Box::new(res));
     }
-    match do_login(&st, jar, req).await {
+    match authenticate(st, req).await {
         Ok(ok) => {
             st.login_throttle.success(&key);
-            ok.into_response()
+            tracing::info!(cloud = %ok.0, user = %ok.1.token.user.name, "login");
+            Ok(ok)
         }
         Err(e) => {
             if e.status == StatusCode::UNAUTHORIZED {
                 st.login_throttle.failure(&key);
                 tracing::info!(account = %key, "sign-in failed");
             }
-            e.into_response()
+            Err(Box::new(e.into_response()))
         }
     }
 }
 
-async fn do_login(
-    st: &AppState,
-    jar: CookieJar,
-    req: LoginRequest,
-) -> Result<(CookieJar, Json<SessionInfo>), ApiError> {
+async fn authenticate(st: &AppState, req: LoginRequest) -> Result<(String, CloudLogin), ApiError> {
     let cloud_id = match &req {
         LoginRequest::Password { cloud, .. }
         | LoginRequest::ApplicationCredential { cloud, .. } => cloud,
@@ -337,33 +489,18 @@ async fn do_login(
         }
     };
 
-    let s = Session {
-        cloud_id: cloud.cfg.id.clone(),
-        unscoped,
-        region: pick_region(cloud.cfg.default_region.as_deref(), &token.catalog),
-        token: Arc::new(token),
-        projects,
-        last_seen: Utc::now(),
-        created_at: Utc::now(),
-        prefs: Default::default(),
-    };
-    tracing::info!(cloud = %s.cloud_id, user = %s.token.user.name, "login");
-    // Signing in again from the same browser ends the previous session (and its tokens)
-    // instead of leaving it alive under a cookie the browser no longer sends.
-    if let Some(old) = jar.get(COOKIE).map(|c| c.value().to_owned())
-        && let Some(prev) = st.sessions.remove(&old).await
-        && let Some(c) = st.by_id.get(&prev.cloud_id)
-    {
-        let _ = c.keystone.revoke(&prev.token.value).await;
-        if let Some(u) = &prev.unscoped {
-            let _ = c.keystone.revoke(u).await;
-        }
-    }
-    let body = info(st, &s);
-    let id = st.sessions.create(s).await;
-    Ok((jar.add(session_cookie(st, id)), Json(body)))
+    Ok((
+        cloud.cfg.id.clone(),
+        CloudLogin {
+            unscoped,
+            region: pick_region(cloud.cfg.default_region.as_deref(), &token.catalog),
+            token: Arc::new(token),
+            projects,
+        },
+    ))
 }
 
+/// `POST /api/auth/logout`: end the session and every cloud's tokens.
 async fn logout(
     State(st): State<AppState>,
     jar: CookieJar,
@@ -371,12 +508,9 @@ async fn logout(
 ) -> (CookieJar, StatusCode) {
     if let Some(axum::Extension(SessionId(id))) = sid_ext
         && let Some(s) = st.sessions.remove(&id).await
-        && let Some(cloud) = st.by_id.get(&s.cloud_id)
     {
-        // Best effort: revoke both tokens so they can't be reused.
-        let _ = cloud.keystone.revoke(&s.token.value).await;
-        if let Some(u) = &s.unscoped {
-            let _ = cloud.keystone.revoke(u).await;
+        for (cloud_id, l) in &s.logins {
+            revoke(&st, cloud_id, l).await;
         }
     }
     (
@@ -385,9 +519,58 @@ async fn logout(
     )
 }
 
+/// Sign the session out of one cloud, revoking its tokens unless Keystone already did (e.g.
+/// after a password change). The session ends with its last cloud: then None.
+pub async fn drop_cloud(
+    st: &AppState,
+    sid: &str,
+    cloud_id: &str,
+    revoke_tokens: bool,
+) -> Option<Session> {
+    let mut gone = None;
+    let s = st
+        .sessions
+        .update(sid, |s| gone = s.sign_out(cloud_id))
+        .await;
+    if revoke_tokens && let Some(l) = &gone {
+        revoke(st, cloud_id, l).await;
+    }
+    match s {
+        Some(s) if !s.logins.is_empty() => Some(s),
+        Some(_) => {
+            st.sessions.remove(sid).await;
+            None
+        }
+        None => None,
+    }
+}
+
+/// `DELETE /api/session/clouds/{cloud}`: sign out of one cloud. Answers the session as seen
+/// from its active cloud, or 204 and no cookie when that was the last one.
+async fn sign_out_cloud(
+    State(st): State<AppState>,
+    jar: CookieJar,
+    sid_ext: Option<axum::Extension<SessionId>>,
+    Path(cloud): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = sid(sid_ext)?;
+    tracing::info!(cloud = %cloud, "signed out of one cloud");
+    Ok(match drop_cloud(&st, &id, &cloud, true).await {
+        Some(s) => Json(info(&st, &s, &s.active)).into_response(),
+        None => (
+            jar.remove(Cookie::build(COOKIE).path("/")),
+            StatusCode::NO_CONTENT,
+        )
+            .into_response(),
+    })
+}
+
+/// `GET /api/session`: the session as seen from the request's cloud, or from the active
+/// cloud when the request's cloud was signed out (the UI then moves the tab there).
 async fn session(
     State(st): State<AppState>,
     sid_ext: Option<axum::Extension<SessionId>>,
+    selected: Option<axum::Extension<SelectedCloud>>,
 ) -> Result<Json<SessionInfo>, ApiError> {
     let id = sid(sid_ext)?;
     let s = st
@@ -395,7 +578,53 @@ async fn session(
         .get(&id)
         .await
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
-    Ok(Json(info(&st, &s)))
+    let cloud = selected
+        .map(|e| e.0.0)
+        .filter(|c| s.logins.contains_key(c))
+        .unwrap_or_else(|| s.active.clone());
+    Ok(Json(info(&st, &s, &cloud)))
+}
+
+#[derive(Deserialize)]
+struct SwitchCloud {
+    cloud: String,
+}
+
+/// `POST /api/session/cloud`: make one of the session's clouds the active one (the default
+/// for new tabs) and answer the session as seen from it. No sign-in involved.
+async fn switch_cloud(
+    State(st): State<AppState>,
+    sid_ext: Option<axum::Extension<SessionId>>,
+    Json(req): Json<SwitchCloud>,
+) -> Result<Json<SessionInfo>, ApiError> {
+    let id = sid(sid_ext)?;
+    let s = st
+        .sessions
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
+    if !s.logins.contains_key(&req.cloud) {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "not signed in to that cloud",
+        ));
+    }
+    let s = st
+        .sessions
+        .update(&id, |s| s.active = req.cloud.clone())
+        .await
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
+    Ok(Json(info(&st, &s, &req.cloud)))
+}
+
+/// Session id and the request's cloud, which the session must be signed in to.
+fn session_cloud(
+    sid_ext: Option<axum::Extension<SessionId>>,
+    ctx: Option<axum::Extension<RequestContext>>,
+) -> Result<(String, String), ApiError> {
+    let id = sid(sid_ext)?;
+    let ctx = ctx.ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "not logged in"))?;
+    Ok((id, ctx.0.cloud_id))
 }
 
 #[derive(Deserialize)]
@@ -406,27 +635,32 @@ struct SwitchProject {
 async fn switch_project(
     State(st): State<AppState>,
     sid_ext: Option<axum::Extension<SessionId>>,
+    ctx: Option<axum::Extension<RequestContext>>,
     Json(req): Json<SwitchProject>,
 ) -> Result<Json<SessionInfo>, ApiError> {
-    let id = sid(sid_ext)?;
+    let (id, cloud_id) = session_cloud(sid_ext, ctx)?;
     let s = st
         .sessions
         .get(&id)
         .await
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
-    let unscoped = s.unscoped.clone().ok_or_else(|| {
+    let l = s
+        .logins
+        .get(&cloud_id)
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "not logged in"))?;
+    let unscoped = l.unscoped.clone().ok_or_else(|| {
         ApiError::new(
             StatusCode::CONFLICT,
             "application credential sessions are bound to one project",
         )
     })?;
-    if !s.projects.iter().any(|p| p.id == req.project_id) {
+    if !l.projects.iter().any(|p| p.id == req.project_id) {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "no access to that project",
         ));
     }
-    let cloud = &st.by_id[&s.cloud_id];
+    let cloud = &st.by_id[&cloud_id];
     let token = cloud
         .keystone
         .authenticate(
@@ -434,20 +668,23 @@ async fn switch_project(
             &Scope::ProjectId(req.project_id),
         )
         .await?;
-    let old = s.token.value.clone();
+    let old = l.token.value.clone();
     let regions = token.catalog.regions();
     let s = st
         .sessions
         .update(&id, |s| {
-            if !s.region.as_ref().is_some_and(|r| regions.contains(r)) {
-                s.region = pick_region(cloud.cfg.default_region.as_deref(), &token.catalog);
+            if let Some(l) = s.logins.get_mut(&cloud_id) {
+                if !l.region.as_ref().is_some_and(|r| regions.contains(r)) {
+                    l.region = pick_region(cloud.cfg.default_region.as_deref(), &token.catalog);
+                }
+                l.token = Arc::new(token);
             }
-            s.token = Arc::new(token);
         })
         .await
+        .filter(|s| s.logins.contains_key(&cloud_id))
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
     let _ = cloud.keystone.revoke(&old).await;
-    Ok(Json(info(&st, &s)))
+    Ok(Json(info(&st, &s, &cloud_id)))
 }
 
 #[derive(Deserialize)]
@@ -458,23 +695,33 @@ struct SwitchRegion {
 async fn switch_region(
     State(st): State<AppState>,
     sid_ext: Option<axum::Extension<SessionId>>,
+    ctx: Option<axum::Extension<RequestContext>>,
     Json(req): Json<SwitchRegion>,
 ) -> Result<Json<SessionInfo>, ApiError> {
-    let id = sid(sid_ext)?;
+    let (id, cloud_id) = session_cloud(sid_ext, ctx)?;
     let s = st
         .sessions
         .get(&id)
         .await
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
-    if !s.token.catalog.regions().contains(&req.region) {
+    let l = s
+        .logins
+        .get(&cloud_id)
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "not logged in"))?;
+    if !l.token.catalog.regions().contains(&req.region) {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "unknown region"));
     }
     let s = st
         .sessions
-        .update(&id, |s| s.region = Some(req.region))
+        .update(&id, |s| {
+            if let Some(l) = s.logins.get_mut(&cloud_id) {
+                l.region = Some(req.region);
+            }
+        })
         .await
+        .filter(|s| s.logins.contains_key(&cloud_id))
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
-    Ok(Json(info(&st, &s)))
+    Ok(Json(info(&st, &s, &cloud_id)))
 }
 
 /// Limits for UI preferences kept in the session (and so in memcached).
@@ -542,7 +789,8 @@ async fn probe(st: &AppState, ctx: &RequestContext, service_type: &str, path: &s
         },
     };
     let key = format!(
-        "{}|{}|{}|{}|{service_type}|{path}",
+        "{}|{}|{}|{}|{}|{service_type}|{path}",
+        ctx.cloud_id,
         ctx.token.catalog.regions().join(","),
         ctx.region.as_deref().unwrap_or(""),
         ctx.token.user.id,
@@ -604,4 +852,39 @@ async fn nav_items(
         items.extend(ext.nav().into_iter().filter(|i| allowed(&i.role)));
     }
     Ok(Json(NavResponse { items, extensions }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(uri: &str, header: Option<&str>) -> Request {
+        let mut b = Request::builder().uri(uri);
+        if let Some(h) = header {
+            b = b.header(CLOUD_HEADER, h);
+        }
+        b.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn cloud_comes_from_the_header_or_a_link_parameter() {
+        let mut r = req("/image/images/x/file?a=1", Some("stg2"));
+        assert_eq!(requested_cloud(&mut r).as_deref(), Some("stg2"));
+        assert_eq!(r.uri(), "/image/images/x/file?a=1");
+
+        // Downloads: the parameter is taken out before the request reaches the handler.
+        let mut r = req(
+            "/object-store/containers/c/objects/o?rassvet_cloud=stg1&x=2",
+            None,
+        );
+        assert_eq!(requested_cloud(&mut r).as_deref(), Some("stg1"));
+        assert_eq!(r.uri(), "/object-store/containers/c/objects/o?x=2");
+        let mut r = req("/image/images/x/file?rassvet_cloud=stg1", None);
+        assert_eq!(requested_cloud(&mut r).as_deref(), Some("stg1"));
+        assert_eq!(r.uri(), "/image/images/x/file");
+
+        let mut r = req("/nav?rassvet_cloudy=1", None);
+        assert_eq!(requested_cloud(&mut r), None);
+        assert_eq!(r.uri(), "/nav?rassvet_cloudy=1");
+    }
 }

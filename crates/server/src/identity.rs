@@ -186,8 +186,9 @@ struct ChangePassword {
     password: String,
 }
 
-/// Change the signed-in user's password. Keystone revokes the user's tokens, so the
-/// session ends here and the user signs in again with the new password.
+/// Change the signed-in user's password. Keystone revokes the user's tokens, so the session
+/// is signed out of this cloud (and ends if it has no other) and the user signs in again
+/// with the new password.
 async fn change_password(
     State(st): State<AppState>,
     ctx: RequestContext,
@@ -211,14 +212,18 @@ async fn change_password(
             }}),
         )
         .await?;
+    let mut ended = true;
     if let Some(axum::Extension(SessionId(id))) = sid {
-        st.sessions.remove(&id).await;
+        ended = crate::api::drop_cloud(&st, &id, &ctx.cloud_id, false)
+            .await
+            .is_none();
     }
-    tracing::info!(user = %ctx.token.user.name, "password changed");
-    Ok((
-        jar.remove(Cookie::build(COOKIE).path("/")),
-        StatusCode::NO_CONTENT,
-    ))
+    tracing::info!(cloud = %ctx.cloud_id, user = %ctx.token.user.name, "password changed");
+    let jar = match ended {
+        true => jar.remove(Cookie::build(COOKIE).path("/")),
+        false => jar,
+    };
+    Ok((jar, StatusCode::NO_CONTENT))
 }
 
 async fn my_app_creds(ctx: RequestContext) -> ApiResult {

@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@/components/Link";
 import { ActionDialog } from "@/components/ActionDialog";
 import { type BulkAction, type Column, DataTable } from "@/components/DataTable";
 import { Picker } from "@/components/Picker";
-import { api } from "@/lib/api";
+import { api, withCloud } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { Badge, Button, Checkbox, ErrorNotice, Icon, PageHeader, StatusDot, Tabs } from "@/components/ui";
 import { fmtBytes, fmtDate } from "@/lib/format";
@@ -295,7 +295,7 @@ export default function ImageList({ admin = false, snapshots = false }: { admin?
             label: tr("Download"),
             icon: "download",
             disabled: i.status !== "active" ? tr("Status is {status}", { status: i.status }) : false,
-            onSelect: () => window.open(`/api/image/images/${encodeURIComponent(i.id)}/file`, "_self"),
+            onSelect: () => window.open(withCloud(`/api/image/images/${encodeURIComponent(i.id)}/file`), "_self"),
           },
           view === "shared" && i.member_status !== "accepted" && { label: tr("Accept"), icon: "check", onSelect: () => setMember.mutate({ id: i.id, member: session.project!.id, status: "accepted" }) },
           view === "shared" && i.member_status !== "rejected" && { label: tr("Reject"), icon: "x", onSelect: () => setMember.mutate({ id: i.id, member: session.project!.id, status: "rejected" }) },

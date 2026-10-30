@@ -4,6 +4,7 @@
  * public links, copy / move / rename, object properties (content type, metadata, expiry)
  * and deletes (folders recursively).
  */
+import { withCloud } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { Link, useNavigate } from "@/components/Link";
@@ -28,7 +29,7 @@ const isDir = (e: Entry): e is { subdir: string } => "subdir" in e;
 const base = (p: string) => p.replace(/\/$/, "").split("/").pop() ?? p;
 
 function download(container: string, name: string) {
-  const a = Object.assign(document.createElement("a"), { href: objectUrl(container, name), download: base(name) });
+  const a = Object.assign(document.createElement("a"), { href: withCloud(objectUrl(container, name)), download: base(name) });
   document.body.append(a);
   a.click();
   a.remove();

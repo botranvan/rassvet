@@ -18,7 +18,7 @@ is left, and find any page or resource quickly.
 ![Sign-in page](../images/project/login.png)
 
 Your session ends after a period of inactivity (one hour by default) or when you click **Sign out** in the
-account menu.
+account menu (which signs you out of every cloud).
 
 ## Find your way around
 
@@ -28,8 +28,9 @@ account menu.
   *Identity* and *Operations*. Entries appear only for services your cloud offers.
 - **Overview** — quota usage of the project (instances, vCPUs, RAM, volumes, floating IPs, networks…) and the
   services available in the current region.
-- **Top bar** — from left to right: where you are, **Search** (command palette), the **project** switcher,
-  the **region** switcher and your **account** menu.
+- **Top bar** — from left to right: where you are, **Search** (command palette), the **cloud** switcher (when
+  your operator configured several clouds), the **project** switcher, the **region** switcher and your
+  **account** menu.
 - **Project / Admin** — users with the `admin` role see a switch at the top of the menu; see the
   [admin guides](../admin/01-admin-view.md).
 - **Cloud and version** — the bottom of the left menu shows the cloud you are signed in to and the Rassvet
@@ -44,6 +45,32 @@ page's name; the logo, the Project / Admin switch and the cloud status stay avai
 status dot for the cloud name and version). Click **Expand menu** (panel icon under the logo) to bring the
 labels back. Rassvet remembers your choice in this browser. You can also press **Ctrl K** and run
 **Collapse or expand the menu**. On narrow screens the menu is a drawer opened with the ☰ button.
+
+## Work with several clouds
+
+When your operator configured several clouds, you can stay signed in to all of them and switch without
+signing out:
+
+1. Click the cloud name in the top bar (cloud icon) and choose **Sign in to another cloud**.
+2. Pick the cloud, enter its credentials (each cloud has its own accounts) and click **Sign in**. You land in
+   the new cloud and stay signed in to the others.
+
+   ![Sign in to another cloud](../images/project/dlg-add-cloud.png)
+
+3. To switch, click the cloud name and pick another cloud from **Signed in to**: no password needed. Each
+   cloud shows the user and project you use there.
+
+   ![Cloud menu with two clouds](../images/project/cloud-menu.png)
+
+   You can also press **Ctrl K** and type the cloud's name:
+
+   ![Switch cloud from the command palette](../images/project/palette-cloud.png)
+
+4. To leave one cloud only, click the sign-out icon next to it. **Sign out** in the account menu leaves all.
+
+Each browser tab remembers its own cloud, so you can keep one tab on each cloud side by side. A new tab opens
+on the cloud you switched to last. When a cloud's sign-in expires, the tabs on it move to another cloud you
+are still signed in to.
 
 ## Switch project or region
 

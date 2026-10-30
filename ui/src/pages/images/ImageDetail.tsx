@@ -1,3 +1,4 @@
+import { withCloud } from "@/lib/api";
 import { ComboInput } from "@/components/ComboInput";
 import { useState } from "react";
 import { useParams } from "react-router";
@@ -82,7 +83,7 @@ export default function ImageDetail({ admin = false }: { admin?: boolean }) {
               )}
               {img.status === "active" && (
                 <a
-                  href={`/api/image/images/${encodeURIComponent(img.id)}/file`}
+                  href={withCloud(`/api/image/images/${encodeURIComponent(img.id)}/file`)}
                   className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-panel px-3.5 text-sm font-medium hover:bg-surface"
                 >
                   <Icon name="download" />

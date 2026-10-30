@@ -67,6 +67,16 @@ secret_key_file = "/etc/rassvet/session.key"   # or secret_key = "…" (≥ 16 c
   deadline (the idle part is refreshed at most once a minute), and memory is swept every
   `session_cleanup_seconds` (default 60). An expired session found on a request is deleted at once.
 
+### Several clouds in one session
+
+A session can be signed in to several `[[cloud]]`s at once: the UI's cloud menu signs in to another one
+(`POST /api/session/clouds`) and switches between them without signing in again. Each request names its
+cloud in the `X-Rassvet-Cloud` header (downloads: `?rassvet_cloud=`), so every browser tab can work on its
+own cloud; requests without it use the cloud chosen last. Each cloud keeps its own Keystone tokens: when one
+expires only that cloud is signed out, and the session lasts until its last token expires (or the idle and
+maximum limits above). Cloud `id`s must be letters, digits, `-`, `_` or `.`. Sessions stored in memcached by
+older versions are still read after an upgrade.
+
 ### Security
 
 - Run behind HTTPS and set `[server] secure_cookies = true`: the session cookie becomes

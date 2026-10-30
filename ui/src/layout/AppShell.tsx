@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Ellipsis, Icon, MenuItem, Popover, StatusDot } from "@/components/ui";
-import { Wordmark } from "@/pages/Login";
+import { Dialog } from "@/components/Dialog";
+import { SignInForm, Wordmark } from "@/pages/Login";
 import {
   type NavItem,
   type NavSection,
   type SessionInfo,
+  useAddCloud,
+  useClouds,
   useLogout,
   useNav,
+  useSignOutCloud,
+  useSwitchCloud,
   useSwitchProject,
   useSwitchRegion,
 } from "@/lib/session";
@@ -163,6 +168,7 @@ export default function AppShell({ session }: { session: SessionInfo }) {
               <span className="hidden md:inline">{tr("Search")}</span>
               <kbd className="hidden rounded border border-line bg-panel px-1 font-mono text-[11px] md:inline">{PALETTE_KEY}</kbd>
             </button>
+            <CloudSwitcher session={session} />
             <ProjectSwitcher session={session} />
             <RegionSwitcher session={session} />
             <UserMenu session={session} />
@@ -316,6 +322,106 @@ function TopButton({ onClick, children, open }: { onClick: () => void; children:
       {children}
       <Icon name="chevrons-up-down" className="size-3.5 text-muted" />
     </button>
+  );
+}
+
+/**
+ * Clouds this session is signed in to: switch this tab between them without signing in
+ * again, sign in to another one, or sign out of one. Hidden with a single configured cloud.
+ */
+function CloudSwitcher({ session }: { session: SessionInfo }) {
+  const configured = useClouds().data ?? [];
+  const sw = useSwitchCloud();
+  const signOut = useSignOutCloud();
+  const add = useAddCloud();
+  const [adding, setAdding] = useState(false);
+  if (configured.length <= 1 && session.clouds.length <= 1) return null;
+  const signedIn = new Set(session.clouds.map((c) => c.id));
+  // Clouds not signed in to yet come first (the form preselects the first one).
+  const choices = [...configured].sort((a, b) => Number(signedIn.has(a.id)) - Number(signedIn.has(b.id)));
+  const busy = sw.isPending || signOut.isPending;
+  return (
+    <>
+      <Popover
+        className="w-72"
+        trigger={({ open, toggle }) => (
+          <TopButton open={open} onClick={toggle}>
+            <Icon name="cloud" className="text-muted" />
+            <span className="truncate" title={session.cloud.name}>
+              {session.cloud.name}
+            </span>
+          </TopButton>
+        )}
+      >
+        {(close) => (
+          <div>
+            <p className="px-2.5 pt-1 pb-1.5 text-xs text-muted">{tr("Signed in to")}</p>
+            <div className="max-h-72 overflow-y-auto">
+              {session.clouds.map((c) => (
+                <div key={c.id} className="group flex items-center gap-1">
+                  <MenuItem
+                    active={c.id === session.cloud.id}
+                    disabled={busy}
+                    onClick={() => {
+                      if (c.id !== session.cloud.id) sw.mutate(c.id);
+                      close();
+                    }}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{c.name}</span>
+                      <span className="block truncate text-xs font-normal text-muted">
+                        {c.project ? `${c.user.name} · ${c.project.name}` : c.user.name}
+                      </span>
+                    </span>
+                    {c.id === session.cloud.id && <Icon name="check" className="ml-auto size-3.5 shrink-0" />}
+                  </MenuItem>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      signOut.mutate(c.id);
+                      close();
+                    }}
+                    aria-label={tr("Sign out of {name}", { name: c.name })}
+                    title={tr("Sign out of {name}", { name: c.name })}
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-ink"
+                  >
+                    <Icon name="log-out" className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="my-1 border-t border-line" />
+            <MenuItem
+              onClick={() => {
+                add.reset();
+                setAdding(true);
+                close();
+              }}
+            >
+              <Icon name="plus" className="text-muted" />
+              {tr("Sign in to another cloud")}
+            </MenuItem>
+          </div>
+        )}
+      </Popover>
+      <Dialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        title={tr("Sign in to another cloud")}
+        description={tr("You stay signed in to your other clouds and can switch between them from this menu.")}
+        size="sm"
+      >
+        <SignInForm
+          clouds={choices}
+          mutation={{
+            mutate: (req) => add.mutate(req, { onSuccess: () => setAdding(false) }),
+            isPending: add.isPending,
+            error: add.error,
+          }}
+        />
+      </Dialog>
+    </>
   );
 }
 

@@ -5,7 +5,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { RemotePaging } from "@/components/DataTable";
-import { api } from "./api";
+import { api, cloudHeaders } from "./api";
 import { tr } from "@/lib/i18n";
 
 export interface AccountStats {
@@ -168,6 +168,7 @@ export function uploadObject(container: string, name: string, file: Blob, onProg
   const done = new Promise<void>((resolve, reject) => {
     xhr.open("PUT", objectUrl(container, name));
     xhr.setRequestHeader("x-rassvet-csrf", "1");
+    for (const [k, v] of Object.entries(cloudHeaders())) xhr.setRequestHeader(k, v);
     xhr.setRequestHeader("Content-Type", (file as File).type || "application/octet-stream");
     xhr.upload.onprogress = (e) => onProgress(e.loaded, e.total || file.size);
     xhr.onload = () => {

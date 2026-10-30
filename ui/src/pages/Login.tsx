@@ -1,7 +1,7 @@
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Picker } from "@/components/Picker";
 import { Button, ErrorNotice, Field, Input } from "@/components/ui";
-import { useClouds, useLogin, useServerVersion } from "@/lib/session";
+import { type CloudInfo, type LoginRequest, useClouds, useLogin, useServerVersion } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { tr, trx } from "@/lib/i18n";
@@ -12,29 +12,6 @@ export default function Login() {
   const clouds = useClouds();
   const version = useServerVersion();
   const login = useLogin();
-  const [method, setMethod] = useState<Method>("password");
-  const [cloud, setCloud] = useState("");
-  const [domain, setDomain] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [credId, setCredId] = useState("");
-  const [credSecret, setCredSecret] = useState("");
-
-  const list = clouds.data ?? [];
-  const selected = list.find((c) => c.id === cloud) ?? list[0];
-  useEffect(() => {
-    if (!cloud && list[0]) setCloud(list[0].id);
-  }, [cloud, list]);
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    login.mutate(
-      method === "password"
-        ? { method, cloud: selected.id, domain: domain || undefined, username, password }
-        : { method, cloud: selected.id, id: credId, secret: credSecret },
-    );
-  }
 
   return (
     <div className="grid min-h-full lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,1fr)]">
@@ -46,125 +23,180 @@ export default function Login() {
             <Wordmark className="text-ink" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{tr("Sign in")}</h1>
-          <p className="mt-1 text-sm text-muted">
-            {trx("Use your OpenStack account{v}.", { v: selected ? tr(" on {name}", { name: selected.name }) : "" })}
-          </p>
-
-          <div role="tablist" className="mt-7 grid grid-cols-2 rounded-lg bg-ink/5 p-1 text-sm">
-            {(
-              [
-                ["password", tr("Password")],
-                ["application_credential", tr("App credential")],
-              ] as [Method, string][]
-            ).map(([m, label]) => (
-              <button
-                key={m}
-                role="tab"
-                aria-selected={method === m}
-                onClick={() => setMethod(m)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 font-medium text-muted transition-colors",
-                  method === m && "bg-panel text-ink shadow-sm",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={submit} className="mt-6 space-y-4">
-            {list.length > 1 && (
-              <Field label={tr("Cloud")}>
-                {(id) => (
-                  <Picker id={id} value={selected?.id ?? ""} onChange={setCloud} options={list.map((c) => ({ value: c.id, label: c.name, icon: "server" }))} />
-                )}
-              </Field>
+          <SignInForm
+            clouds={clouds.data ?? []}
+            mutation={login}
+            error={clouds.error}
+            intro={(selected) => (
+              <p className="mt-1 text-sm text-muted">
+                {trx("Use your OpenStack account{v}.", { v: selected ? tr(" on {name}", { name: selected.name }) : "" })}
+              </p>
             )}
-
-            {method === "password" ? (
-              <>
-                <Field label={tr("Domain")}>
-                  {(id) => (
-                    <Input
-                      id={id}
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                      placeholder={selected?.default_domain ?? tr("Default")}
-                      autoComplete="organization"
-                    />
-                  )}
-                </Field>
-                <Field label={tr("Username")}>
-                  {(id) => (
-                    <Input
-                      id={id}
-                      required
-                      autoFocus
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      autoComplete="username"
-                    />
-                  )}
-                </Field>
-                <Field label={tr("Password")}>
-                  {(id) => (
-                    <Input
-                      id={id}
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete="current-password"
-                    />
-                  )}
-                </Field>
-              </>
-            ) : (
-              <>
-                <Field label={tr("Credential ID")}>
-                  {(id) => (
-                    <Input
-                      id={id}
-                      required
-                      value={credId}
-                      onChange={(e) => setCredId(e.target.value)}
-                      className="font-mono text-[13px]"
-                      spellCheck={false}
-                    />
-                  )}
-                </Field>
-                <Field label={tr("Secret")} hint={tr("Application credentials are bound to a single project.")}>
-                  {(id) => (
-                    <Input
-                      id={id}
-                      type="password"
-                      required
-                      value={credSecret}
-                      onChange={(e) => setCredSecret(e.target.value)}
-                      autoComplete="off"
-                    />
-                  )}
-                </Field>
-              </>
-            )}
-
-            <ErrorNotice error={login.error ?? clouds.error} />
-
-            <Button
-              type="submit"
-              variant="primary"
-              busy={login.isPending}
-              disabled={!selected}
-              className="h-10 w-full"
-            >
-              {tr("Sign in")}
-            </Button>
-          </form>
+          />
           <LanguagePicker className="mx-auto mt-8 max-w-60" />
           {version.data && <p className="mt-4 text-center font-mono text-xs text-muted">rassvet v{version.data}</p>}
         </div>
       </main>
     </div>
+  );
+}
+
+/**
+ * Cloud, method and credentials. Used by the sign-in page and by "Sign in to another cloud"
+ * (`mutation` is then `useAddCloud`), so both work the same way.
+ */
+export function SignInForm({
+  clouds: list,
+  mutation,
+  error,
+  intro,
+  submitLabel = tr("Sign in"),
+}: {
+  clouds: CloudInfo[];
+  mutation: { mutate: (req: LoginRequest) => void; isPending: boolean; error: Error | null };
+  error?: Error | null;
+  intro?: (selected: CloudInfo | undefined) => ReactNode;
+  submitLabel?: string;
+}) {
+  const [method, setMethod] = useState<Method>("password");
+  const [cloud, setCloud] = useState("");
+  const [domain, setDomain] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [credId, setCredId] = useState("");
+  const [credSecret, setCredSecret] = useState("");
+
+  const selected = list.find((c) => c.id === cloud) ?? list[0];
+  useEffect(() => {
+    if (!cloud && list[0]) setCloud(list[0].id);
+  }, [cloud, list]);
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    mutation.mutate(
+      method === "password"
+        ? { method, cloud: selected.id, domain: domain || undefined, username, password }
+        : { method, cloud: selected.id, id: credId, secret: credSecret },
+    );
+  }
+
+  return (
+    <>
+      {intro?.(selected)}
+
+      <div role="tablist" className={cn("grid grid-cols-2 rounded-lg bg-ink/5 p-1 text-sm", intro && "mt-7")}>
+        {(
+          [
+            ["password", tr("Password")],
+            ["application_credential", tr("App credential")],
+          ] as [Method, string][]
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={method === m}
+            onClick={() => setMethod(m)}
+            className={cn(
+              "rounded-md px-3 py-1.5 font-medium text-muted transition-colors",
+              method === m && "bg-panel text-ink shadow-sm",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <form onSubmit={submit} className="mt-6 space-y-4">
+        {list.length > 1 && (
+          <Field label={tr("Cloud")}>
+            {(id) => (
+              <Picker id={id} value={selected?.id ?? ""} onChange={setCloud} options={list.map((c) => ({ value: c.id, label: c.name, icon: "server" }))} />
+            )}
+          </Field>
+        )}
+
+        {method === "password" ? (
+          <>
+            <Field label={tr("Domain")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  placeholder={selected?.default_domain ?? tr("Default")}
+                  autoComplete="organization"
+                />
+              )}
+            </Field>
+            <Field label={tr("Username")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  required
+                  autoFocus
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                />
+              )}
+            </Field>
+            <Field label={tr("Password")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              )}
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label={tr("Credential ID")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  required
+                  value={credId}
+                  onChange={(e) => setCredId(e.target.value)}
+                  className="font-mono text-[13px]"
+                  spellCheck={false}
+                />
+              )}
+            </Field>
+            <Field label={tr("Secret")} hint={tr("Application credentials are bound to a single project.")}>
+              {(id) => (
+                <Input
+                  id={id}
+                  type="password"
+                  required
+                  value={credSecret}
+                  onChange={(e) => setCredSecret(e.target.value)}
+                  autoComplete="off"
+                />
+              )}
+            </Field>
+          </>
+        )}
+
+        <ErrorNotice error={mutation.error ?? error} />
+
+        <Button
+          type="submit"
+          variant="primary"
+          busy={mutation.isPending}
+          disabled={!selected}
+          className="h-10 w-full"
+        >
+          {submitLabel}
+        </Button>
+      </form>
+    </>
   );
 }
 
