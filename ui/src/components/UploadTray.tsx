@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api } from "@/lib/api";
+import { api, cloudHeaders } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Icon } from "./ui";
@@ -50,6 +50,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const qs = stores.length ? `?stores=${encodeURIComponent(stores.join(","))}` : "";
       xhr.open("PUT", `/api/image/images/${encodeURIComponent(imageId)}/file${qs}`);
       xhr.setRequestHeader("x-rassvet-csrf", "1");
+      // The upload keeps going to this cloud if the tab switches to another one meanwhile.
+      for (const [k, v] of Object.entries(cloudHeaders())) xhr.setRequestHeader(k, v);
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
       xhr.upload.onprogress = (e) => patch(imageId, { loaded: e.loaded, total: e.total || file.size });
       xhr.onload = () => {

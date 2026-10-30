@@ -142,6 +142,16 @@ impl Config {
         if ids.windows(2).any(|w| w[0] == w[1]) {
             bail!("duplicate [[cloud]] id");
         }
+        // The UI names the cloud of each request in a header and in download links.
+        if let Some(bad) = ids.iter().find(|id| {
+            id.is_empty()
+                || id.len() > 64
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        }) {
+            bail!("[[cloud]] id {bad:?} must be 1-64 letters, digits, '-', '_' or '.'");
+        }
         if let Some(m) = &cfg.memcached {
             if m.key_prefix.is_empty()
                 || m.key_prefix.len() > 64

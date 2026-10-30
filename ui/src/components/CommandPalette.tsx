@@ -1,6 +1,6 @@
 /**
  * Command palette (Ctrl/⌘ K): jump to any page, run a quick action (launch, create, switch
- * project / region / view, theme, language, sign out) or find a resource by name or by a
+ * cloud / project / region / view, theme, language, sign out) or find a resource by name or by a
  * pasted UUID (instances, volumes, networks, routers, security groups, images, and Kubernetes
  * clusters and cluster templates when the Magnum extension is enabled).
  */
@@ -12,7 +12,7 @@ import { Icon } from "@/components/ui";
 import { LANGS, lang, setLang, tr } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import { os } from "@/lib/os";
-import { type NavItem, type SessionInfo, useLogout, useNav, useSwitchProject, useSwitchRegion } from "@/lib/session";
+import { type NavItem, type SessionInfo, useLogout, useNav, useSwitchCloud, useSwitchProject, useSwitchRegion } from "@/lib/session";
 import { toggleSidebar } from "@/lib/sidebar";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -190,6 +190,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
   const goRes = useNavigate();
   const nav = useNav(true);
   const admin = window.location.pathname.startsWith("/admin");
+  const switchCloud = useSwitchCloud();
   const switchProject = useSwitchProject();
   const switchRegion = useSwitchRegion();
   const logout = useLogout();
@@ -261,7 +262,10 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
     const regions: Cmd[] = session.regions
       .filter((r) => r !== session.region)
       .map((r) => ({ id: `region:${r}`, group: tr("Switch region"), label: r, icon: "map-pin", keywords: "region switch", run: done(() => switchRegion.mutate(r)) }));
-    return [...pages, ...actions, ...projects, ...regions];
+    const clouds: Cmd[] = session.clouds
+      .filter((c) => c.id !== session.cloud.id)
+      .map((c) => ({ id: `cloud:${c.id}`, group: tr("Switch cloud"), label: c.name, hint: c.user.name, icon: "cloud", keywords: "cloud switch", run: done(() => switchCloud.mutate(c.id)) }));
+    return [...pages, ...actions, ...clouds, ...projects, ...regions];
   }, [nav.data, session, admin, magnumOn, octaviaOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim();
@@ -271,7 +275,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s || a.i - b.i)
       .map((x) => x.c);
-    // Without a query: actions first, then pages; projects/regions only when searched.
+    // Without a query: actions first, then pages; clouds/projects/regions only when searched.
     const shown = query ? ranked.slice(0, 40) : [...ranked.filter((c) => c.group === tr("Actions")).slice(0, 6), ...ranked.filter((c) => c.group === tr("Go to")).slice(0, 8)];
     const res: Cmd[] =
       query.length >= 2 && debounced === query

@@ -32,7 +32,9 @@ export default function ChangePassword() {
               { original_password: current, password: next },
               {
                 onSuccess: () => {
-                  qc.setQueryData(["session"], null);
+                  // Signed out of this cloud; re-reading the session moves to another cloud
+                  // still signed in to, or to the sign-in page.
+                  void qc.invalidateQueries({ queryKey: ["session"] });
                   toast(tr("Password changed. Sign in with your new password."));
                 },
               },

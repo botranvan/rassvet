@@ -14,7 +14,7 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
 
 | # | Guide | You will learn to |
 |---|-------|-------------------|
-| 1 | [Getting started](project/01-getting-started.md) | sign in, find your way around, switch project and region, use the command palette |
+| 1 | [Getting started](project/01-getting-started.md) | sign in, find your way around, work with several clouds, switch project and region, use the command palette |
 | 2 | [Launch an instance](project/02-launch-instance.md) | create a virtual machine with the launch wizard |
 | 3 | [Work with instances](project/03-manage-instances.md) | open the console, add a public IP, attach a volume, snapshot, resize, stop and delete |
 | 4 | [Key pairs](project/04-key-pairs.md) | create or import an SSH key and log in to an instance |
@@ -124,8 +124,10 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
   copy/move and temporary links. EC2 credentials give S3 tools (aws, s3cmd, rclone, boto3) access, with ready
   configuration snippets.
 - Key manager (Barbican): secrets (store, generate, view payload), secret containers, orders and ACLs.
-- Command palette (Ctrl/⌘ K): jump to any page, run quick actions (launch, create, switch project, region or
-  view, theme, language) and find instances, volumes, networks, routers, security groups and images by name
+- Several clouds in one session: sign in to another cloud from the top bar and switch between them without
+  signing in again; each browser tab can work on a different cloud.
+- Command palette (Ctrl/⌘ K): jump to any page, run quick actions (launch, create, switch cloud, project,
+  region or view, theme, language) and find instances, volumes, networks, routers, security groups and images by name
   or pasted ID.
 - Cleanup: finds unattached volumes, volumes in error, old snapshots, unused floating IPs, detached ports,
   unused security groups, instances in error or stopped for long, empty routers, networks without ports,
