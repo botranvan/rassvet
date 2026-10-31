@@ -4678,6 +4678,20 @@ const vi: Record<string, string> = {
   "Warning": "Cảnh báo",
   "No heartbeat": "Mất heartbeat",
   "Designate keeps a host's last status after it stops reporting (e.g. a replaced pod); hosts without a heartbeat for 2 minutes are shown as such.": "Designate giữ trạng thái cuối của một host kể cả khi nó ngừng báo cáo (ví dụ pod đã bị thay); host không có heartbeat trong 2 phút sẽ được đánh dấu.",
+  // Command palette, Cleanup and Terraform contributions of extensions
+  "DNS zones (with record sets)": "Vùng DNS (kèm record set)",
+  "DNS zones in error": "Vùng DNS bị lỗi",
+  "Every record set of each zone goes with it.": "Mọi record set của từng vùng sẽ bị xóa theo.",
+  "Load balancers in error": "Load balancer bị lỗi",
+  "Load balancers that accept no traffic. Each still runs its amphorae (or provider resources) and holds a VIP address.": "Load balancer không nhận lưu lượng nào. Mỗi cái vẫn chạy amphora (hoặc tài nguyên của provider) và giữ một địa chỉ VIP.",
+  "Load balancers whose create, update or failover failed. Their amphorae and VIP ports may still hold quota.": "Load balancer tạo, cập nhật hoặc failover thất bại. Amphora và cổng VIP của chúng có thể vẫn chiếm hạn mức.",
+  "Load balancers without listeners": "Load balancer không có listener",
+  "Object container": "Container lưu trữ đối tượng",
+  "Order": "Order",
+  "Record set": "Record set",
+  "Volume backup": "Bản sao lưu ổ đĩa",
+  "Zones Designate couldn't create, update or push to its name servers. They still count against the zone quota.": "Vùng mà Designate không tạo, cập nhật hoặc đẩy lên name server được. Chúng vẫn tính vào hạn mức vùng.",
+  "{n} record sets": "{n} record set",
 };
 
 export default vi;

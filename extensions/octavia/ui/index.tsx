@@ -1,4 +1,6 @@
 import type { ExtensionUi } from "@rassvet/sdk";
+import { cleanup } from "./cleanup";
+import { palette } from "./palette";
 import Amphorae from "./Amphorae";
 import { ListenerDetail, LoadBalancerDetail, PoolDetail } from "./Detail";
 import LoadBalancers from "./LoadBalancers";
@@ -13,6 +15,8 @@ const ui: ExtensionUi = {
     { path: "amphorae", component: Amphorae, adminOnly: true },
     { path: "settings", component: Settings, adminOnly: true },
   ],
+  palette,
+  cleanup,
 };
 
 export default ui;

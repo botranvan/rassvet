@@ -6,6 +6,9 @@
  * type `ExtensionUi`. Its routes are mounted under `/ext/<id>/`.
  */
 import type { ComponentType } from "react";
+import type { CleanupContribution } from "@/lib/cleanup";
+import type { ResourceKind } from "@/lib/palette";
+import type { TerraformContribution } from "@/lib/terraform";
 
 export { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 export { ApiError, api } from "@/lib/api";
@@ -62,6 +65,9 @@ export { Picker, MultiPicker, type PickOption } from "@/components/Picker";
 export { ComboInput, type ComboOption } from "@/components/ComboInput";
 export { ActionMenu, type MenuEntry } from "@/components/Menu";
 export { KeyValueEditor, type KvRow, toRows, fromRows, kvError } from "@/components/KeyValueEditor";
+export { type ResourceKind, type PaletteContext, findPath } from "@/lib/palette";
+export { type TerraformContribution, type TfSource, type TfSection, type TfItem, type TfContext, type TfGen, type TfSelection, str as hclString } from "@/lib/terraform";
+export { type CleanupContribution, type CleanupContext, type Finder, idle } from "@/lib/cleanup";
 export { useProjectFilter, filters, text, choice, idFilter, nameRegex, matches, statusLabel } from "@/lib/filters";
 
 export interface ExtensionRoute {
@@ -72,6 +78,21 @@ export interface ExtensionRoute {
   adminOnly?: boolean;
 }
 
+/** What an extension adds to the command palette (Ctrl/⌘ K). */
+export interface PaletteContribution {
+  /** Extra words that find the extension's pages, e.g. "k8s" for Kubernetes. */
+  keywords?: string;
+  /** "Create …" actions; `path` is relative to the extension's base (`/ext/<id>` or `/admin/ext/<id>`). */
+  actions?: { id: string; label: string; icon: string; path: string; keywords?: string }[];
+  /** Resources found by name or by a pasted ID. */
+  resources?: ResourceKind[];
+}
+
 export interface ExtensionUi {
   routes: ExtensionRoute[];
+  palette?: PaletteContribution;
+  /** Resources of the extension in Operations › Export to Terraform. */
+  terraform?: TerraformContribution;
+  /** Leftovers of the extension in Operations › Cleanup. */
+  cleanup?: CleanupContribution;
 }

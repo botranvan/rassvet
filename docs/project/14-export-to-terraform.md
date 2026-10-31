@@ -12,8 +12,9 @@ writes the Terraform (or OpenTofu) code for the resources you pick.
 
 1. Go to **Operations → Export to Terraform**.
 2. On the left, tick what to export in each section: **Instances**, **Volumes**, **Networks (with subnets)**,
-   **Routers (with interfaces)**, **Security groups (with rules)**, **Floating IPs**, **Key pairs** and, when the
-   cloud has Magnum, **Kubernetes cluster templates** and **Kubernetes clusters**. Use the filter box, **All** and
+   **Routers (with interfaces)**, **Security groups (with rules)**, **Floating IPs**, **Key pairs**; when the
+   cloud has Magnum, **Kubernetes cluster templates** and **Kubernetes clusters**; when it has Designate,
+   **DNS zones (with record sets)**. Use the filter box, **All** and
    **None** in long lists.
 3. Choose the options on the right:
    - **Add what they need** (on by default) — an instance's key pair, security groups, project networks,

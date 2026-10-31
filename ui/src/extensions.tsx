@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useMemo } from "react";
 import { Route } from "react-router";
 import type { ExtensionUi } from "@rassvet/sdk";
 import { tr } from "@/lib/i18n";
+import { useNav } from "@/lib/session";
 
 /**
  * Every `extensions/<id>/ui/index.tsx` is discovered at build time and code-split.
@@ -66,3 +68,27 @@ export function useExtensionRouteElements(exts: LoadedExtension[], isAdmin: bool
     [exts, isAdmin],
   );
 }
+
+export interface ExtensionModule {
+  id: string;
+  ui: ExtensionUi;
+}
+
+/**
+ * The UI modules of the extensions available in this session, for the host features they
+ * plug into (command palette, Terraform export, Cleanup). Undefined while loading.
+ */
+export function useExtensionUis(): ExtensionModule[] | undefined {
+  const nav = useNav(true);
+  const ids = (nav.data?.extensions.map((e) => e.id) ?? []).filter((id) => byId[id]);
+  const q = useQuery({
+    queryKey: ["extension-uis", ids],
+    queryFn: () => Promise.all(ids.map(async (id) => ({ id, ui: (await byId[id]()).default }))),
+    enabled: nav.isSuccess,
+    staleTime: Infinity,
+  });
+  return nav.isError ? [] : q.data;
+}
+
+/** Where an extension's pages are: `/ext/<id>`, or `/admin/ext/<id>` in the admin view. */
+export const extBase = (id: string, admin: boolean) => `${admin ? "/admin" : ""}/ext/${id}`;

@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { usePref } from "@/lib/prefs";
+import { useFindParam } from "@/lib/useTab";
 import { cn } from "@/lib/utils";
 import { type BulkAction, BulkActionDialog } from "./BulkActions";
 import { downloadText } from "./CodeBlock";
@@ -214,7 +215,8 @@ export function DataTable<T>({
   const prefKey = tableId && !remote ? `table.${tableId}${pathname.replace(/[^A-Za-z0-9._-]+/g, ":")}`.slice(0, 120) : undefined;
   const [saved, save] = usePref<{ q?: string; sort?: { key: string; dir: 1 | -1 } | null }>(prefKey);
   const remoteText = remote?.filters?.find((f) => f.key === remote.filter?.key && !f.options) ? remote.filter!.value : "";
-  const [q, setQ] = useState(() => (remote ? remoteText : (saved?.q ?? "")));
+  const find = useFindParam();
+  const [q, setQ] = useState(() => (remote ? remoteText : find || (saved?.q ?? "")));
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(() => (remote ? (remote.sort ?? null) : (saved?.sort ?? null)));
   useEffect(() => {
     if (!prefKey || (!saved && !q && !sort)) return;
@@ -286,7 +288,8 @@ export function DataTable<T>({
     let out = rows ?? [];
     const needle = serverSearch || fields ? "" : q.trim().toLowerCase();
     if (needle) {
-      out = out.filter((r) => columns.some((c) => String(c.value?.(r) ?? "").toLowerCase().includes(needle)));
+      // The row's ID too: `?find=<uuid>` from the command palette lands on its row.
+      out = out.filter((r) => rowKey(r).toLowerCase() === needle || columns.some((c) => String(c.value?.(r) ?? "").toLowerCase().includes(needle)));
     }
     if (sort && !serverSort) {
       const col = columns.find((c) => c.key === sort.key);

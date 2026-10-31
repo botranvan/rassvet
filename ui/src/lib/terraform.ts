@@ -7,6 +7,10 @@
  * time with a `data` source looked up by name; when a name can't find it unambiguously, it
  * becomes a `variable` whose default is today's ID. With `lookups: "literal"` the IDs are
  * written in place instead.
+ *
+ * The host exports core OpenStack resources; an extension adds its own kinds with a
+ * `TerraformContribution` (`ExtensionUi.terraform`): a hook that loads them and lists them on
+ * the page, and the code that writes their blocks with the `TfGen` helpers.
  */
 import type { FloatingIp, Keypair, Network, Port, Router, SecurityGroup, SecurityGroupRule, Server, Subnet, Volume } from "./os";
 
@@ -22,73 +26,92 @@ export interface TfInput {
   keypairs: Keypair[];
   /** Glance images (id + name), to look images up by name. */
   images?: { id: string; name?: string | null }[];
-  /** Magnum cluster templates and clusters (when the Magnum extension is on). */
-  clustertemplates?: TfClusterTemplate[];
-  clusters?: TfCluster[];
 }
 
-/** The Magnum attributes the export writes (see extensions/magnum/ui/api.ts for the full shapes). */
-export interface TfClusterTemplate {
-  uuid: string;
+export type TfKind = "servers" | "volumes" | "networks" | "routers" | "secgroups" | "fips" | "keypairs";
+export const CORE_KINDS: TfKind[] = ["servers", "volumes", "networks", "routers", "secgroups", "fips", "keypairs"];
+/** Picked IDs per kind: the core kinds, and `<extension>.<kind>` for an extension's. */
+export type TfSelection = Record<string, Set<string>>;
+
+export const emptySelection = (kinds: string[] = CORE_KINDS): TfSelection => Object.fromEntries(kinds.map((k) => [k, new Set<string>()]));
+const ids = (sel: TfSelection, kind: string) => sel[kind] ?? new Set<string>();
+
+// ---------------------------------------------------------------- extension contract
+
+/** A row in a section of the page. */
+export interface TfItem {
+  id: string;
   name: string;
-  coe: string;
-  image_id: string;
-  keypair_id?: string | null;
-  external_network_id?: string | null;
-  fixed_network?: string | null;
-  fixed_subnet?: string | null;
-  flavor_id?: string | null;
-  master_flavor_id?: string | null;
-  dns_nameserver?: string | null;
-  network_driver?: string | null;
-  driver?: string | null;
-  volume_driver?: string | null;
-  docker_volume_size?: number | null;
-  docker_storage_driver?: string | null;
-  server_type?: string | null;
-  master_lb_enabled?: boolean;
-  floating_ip_enabled?: boolean;
-  tls_disabled?: boolean;
-  public?: boolean;
-  hidden?: boolean;
-  registry_enabled?: boolean;
-  labels?: Record<string, unknown> | null;
-  project_id?: string;
+  sub?: string;
 }
 
-export interface TfCluster {
-  uuid: string;
-  name: string;
-  cluster_template_id: string;
-  keypair?: string | null;
-  master_count: number;
-  node_count: number;
-  flavor_id?: string | null;
-  master_flavor_id?: string | null;
-  docker_volume_size?: number | null;
-  create_timeout?: number;
-  fixed_network?: string | null;
-  fixed_subnet?: string | null;
-  floating_ip_enabled?: boolean | null;
-  master_lb_enabled?: boolean | null;
-  labels?: Record<string, unknown> | null;
-  project_id?: string;
+/** One list of pickable resources on the page. */
+export interface TfSection {
+  /** Unique: `<extension>.<kind>`. */
+  kind: string;
+  icon: string;
+  title: string;
+  /** Undefined while loading. */
+  items?: TfItem[];
+  loading: boolean;
+  error: unknown;
 }
 
-export type TfKind = "servers" | "volumes" | "networks" | "routers" | "secgroups" | "fips" | "keypairs" | "clustertemplates" | "clusters";
-export type TfSelection = Record<TfKind, Set<string>>;
+export interface TfContext {
+  /** The current project; an extension lists only its resources. */
+  projectId: string;
+}
 
-export const emptySelection = (): TfSelection => ({
-  servers: new Set(),
-  volumes: new Set(),
-  networks: new Set(),
-  routers: new Set(),
-  secgroups: new Set(),
-  fips: new Set(),
-  keypairs: new Set(),
-  clustertemplates: new Set(),
-  clusters: new Set(),
-});
+/** What an extension contributes to one export. */
+export interface TfSource {
+  sections: TfSection[];
+  /** Adds what the picked resources need to `sel` (core kinds too, e.g. a key pair). */
+  dependencies?: (sel: TfSelection, input: TfInput) => void;
+  /** First pass: `g.name()` every picked resource, so references work in any order. */
+  names?: (g: TfGen, sel: TfSelection) => void;
+  /** Second pass, after the core resources: the blocks. */
+  generate: (g: TfGen, sel: TfSelection) => void;
+}
+
+export interface TerraformContribution {
+  /** A hook (called on every render of the page) that loads the extension's resources. */
+  useSource: (c: TfContext) => TfSource;
+}
+
+/** The helpers `generate` hands to extensions. */
+export interface TfGen {
+  /** The core resources (to resolve references). */
+  input: TfInput;
+  imports: boolean;
+  /** IDs in place instead of data sources / variables. */
+  literal: boolean;
+  /** Resource types of the core blocks (`T.keypair`…), for `addr`. */
+  T: typeof T;
+  /** Reserves the Terraform name of a resource (unique per type) and returns it. */
+  name: (type: string, id: string, base: string | null | undefined) => string;
+  /** The name of a resource written in this file, if any. */
+  addr: (type: string, id: string) => string | undefined;
+  /** A `resource` block (and its `import` block); see the core's for `ignore` / `always`. */
+  block: (type: string, name: string, body: string[], importId?: string, ignore?: string[], always?: string[]) => void;
+  /** `# --- title ---` before a group of blocks. */
+  section: (title: string) => void;
+  /** Aligned `key = value` lines; pairs with an empty value are left out. */
+  attrs: (pairs: [string, string | undefined | null | false][]) => string[];
+  /** HCL map lines (`{`, `k = "v"`…, `}`) of string values. */
+  map: (m: Record<string, string>) => string[];
+  str: (s: string) => string;
+  /** One-line comment-safe text. */
+  note: (s: string) => string;
+  /** A network / subnet / image / key pair expression: exported address, lookup or ID. */
+  network: (id: string) => string;
+  subnet: (id: string) => string;
+  image: (id: string, hint?: string | null) => string;
+  keypair: (name: string) => string;
+  /** A `variable` holding today's ID (or the literal in literal mode). */
+  variable: (kind: string, id: string, label?: string | null) => string;
+  /** Shown above the code. */
+  notes: string[];
+}
 
 const T = {
   server: "openstack_compute_instance_v2",
@@ -102,8 +125,6 @@ const T = {
   rule: "openstack_networking_secgroup_rule_v2",
   fip: "openstack_networking_floatingip_v2",
   keypair: "openstack_compute_keypair_v2",
-  clusterTemplate: "openstack_containerinfra_clustertemplate_v1",
-  cluster: "openstack_containerinfra_cluster_v1",
 } as const;
 
 const ROUTER_IF = new Set(["network:router_interface", "network:router_interface_distributed", "network:ha_router_replicated_interface"]);
@@ -144,21 +165,12 @@ class Namer {
  * The selection plus what it needs to stand on its own: an instance's key pair, security
  * groups, networks (and their subnets), volumes and floating IPs that belong to the project.
  */
-export function withDependencies(input: TfInput, sel: TfSelection, projectId: string): TfSelection {
-  const out: TfSelection = {
-    servers: new Set(sel.servers),
-    volumes: new Set(sel.volumes),
-    networks: new Set(sel.networks),
-    routers: new Set(sel.routers),
-    secgroups: new Set(sel.secgroups),
-    fips: new Set(sel.fips),
-    keypairs: new Set(sel.keypairs),
-    clustertemplates: new Set(sel.clustertemplates),
-    clusters: new Set(sel.clusters),
-  };
+export function withDependencies(input: TfInput, sel: TfSelection, projectId: string, exts: TfSource[] = []): TfSelection {
+  const out: TfSelection = Object.fromEntries(Object.entries(sel).map(([k, v]) => [k, new Set(v)]));
+  for (const k of CORE_KINDS) out[k] ??= new Set();
   const own = (p?: string) => !projectId || p === projectId;
   const netByName = new Map(input.networks.map((n) => [n.name, n]));
-  for (const s of input.servers.filter((x) => sel.servers.has(x.id))) {
+  for (const s of input.servers.filter((x) => ids(sel, "servers").has(x.id))) {
     if (s.key_name && input.keypairs.some((k) => k.name === s.key_name)) out.keypairs.add(s.key_name);
     for (const g of s.security_groups ?? []) {
       const sg = input.secgroups.find((x) => x.name === g.name && own(x.project_id));
@@ -172,15 +184,7 @@ export function withDependencies(input: TfInput, sel: TfSelection, projectId: st
     const ports = new Set(input.ports.filter((p) => p.device_id === s.id).map((p) => p.id));
     for (const f of input.fips) if (f.port_id && ports.has(f.port_id) && own(f.project_id)) out.fips.add(f.id);
   }
-  // A cluster needs its template (when the project owns it) and its key pair.
-  for (const c of (input.clusters ?? []).filter((x) => sel.clusters.has(x.uuid))) {
-    const t = input.clustertemplates?.find((x) => x.uuid === c.cluster_template_id);
-    if (t && own(t.project_id)) out.clustertemplates.add(t.uuid);
-    if (c.keypair && input.keypairs.some((k) => k.name === c.keypair)) out.keypairs.add(c.keypair);
-  }
-  for (const t of (input.clustertemplates ?? []).filter((x) => out.clustertemplates.has(x.uuid))) {
-    if (t.keypair_id && input.keypairs.some((k) => k.name === t.keypair_id)) out.keypairs.add(t.keypair_id);
-  }
+  for (const e of exts) e.dependencies?.(out, input);
   return out;
 }
 
@@ -194,6 +198,7 @@ export function generate(
   input: TfInput,
   sel: TfSelection,
   opts: { imports: boolean; lookups?: "data" | "literal"; project?: string; region?: string | null; cloud?: string; date?: string },
+  exts: TfSource[] = [],
 ): TfResult {
   const nm = new Namer();
   const notes: string[] = [];
@@ -203,16 +208,14 @@ export function generate(
   const literal = opts.lookups === "literal";
   let count = 0;
 
-  const servers = input.servers.filter((x) => sel.servers.has(x.id));
-  const volumes = input.volumes.filter((x) => sel.volumes.has(x.id));
-  const networks = input.networks.filter((x) => sel.networks.has(x.id));
-  const subnets = input.subnets.filter((x) => sel.networks.has(x.network_id));
-  const routers = input.routers.filter((x) => sel.routers.has(x.id));
-  const secgroups = input.secgroups.filter((x) => sel.secgroups.has(x.id));
-  const fips = input.fips.filter((x) => sel.fips.has(x.id));
-  const keypairs = input.keypairs.filter((x) => sel.keypairs.has(x.name));
-  const clusterTemplates = (input.clustertemplates ?? []).filter((x) => sel.clustertemplates.has(x.uuid));
-  const clusters = (input.clusters ?? []).filter((x) => sel.clusters.has(x.uuid));
+  const servers = input.servers.filter((x) => ids(sel, "servers").has(x.id));
+  const volumes = input.volumes.filter((x) => ids(sel, "volumes").has(x.id));
+  const networks = input.networks.filter((x) => ids(sel, "networks").has(x.id));
+  const subnets = input.subnets.filter((x) => ids(sel, "networks").has(x.network_id));
+  const routers = input.routers.filter((x) => ids(sel, "routers").has(x.id));
+  const secgroups = input.secgroups.filter((x) => ids(sel, "secgroups").has(x.id));
+  const fips = input.fips.filter((x) => ids(sel, "fips").has(x.id));
+  const keypairs = input.keypairs.filter((x) => ids(sel, "keypairs").has(x.name));
 
   // Names first, so references work in any order.
   for (const k of keypairs) nm.name(T.keypair, k.name, k.name);
@@ -223,8 +226,6 @@ export function generate(
   for (const v of volumes) nm.name(T.volume, v.id, v.name);
   for (const s of servers) nm.name(T.server, s.id, s.name);
   for (const f of fips) nm.name(T.fip, f.id, f.description || `fip_${f.floating_ip_address.replace(/[.:]/g, "_")}`);
-  for (const t of clusterTemplates) nm.name(T.clusterTemplate, t.uuid, t.name);
-  for (const c of clusters) nm.name(T.cluster, c.uuid, c.name);
 
   const netName = (id: string) => input.networks.find((n) => n.id === id)?.name;
   const subnetName = (id: string) => input.subnets.find((n) => n.id === id)?.name;
@@ -366,6 +367,27 @@ export function generate(
   const map = (m: Record<string, string>) => ["{", ...Object.entries(m).map(([k, v]) => `  ${/^[A-Za-z_][\w-]*$/.test(k) ? k : str(k)} = ${str(v)}`), "}"];
   const list = (xs: string[]) => `[${xs.join(", ")}]`;
   const section = (title: string) => out.push(`# ${"-".repeat(3)} ${title} ${"-".repeat(Math.max(3, 70 - title.length))}`);
+  const gen: TfGen = {
+    input,
+    imports: opts.imports,
+    literal,
+    T,
+    name: (type, id, base) => nm.name(type, id, base),
+    addr: (type, id) => nm.get(type, id),
+    block,
+    section,
+    attrs,
+    map,
+    str,
+    note,
+    network: netExpr,
+    subnet: (id) => refText(T.subnet, id),
+    image: lookImage,
+    keypair: (name) => (nm.get(T.keypair, name) ? `${T.keypair}.${nm.get(T.keypair, name)}.name` : str(name)),
+    variable: (kind, id, label) => (literal ? `${str(id)}${label ? ` # ${note(label)}` : ""}` : variable(kind, id, label)),
+    notes,
+  };
+  for (const e of exts) e.names?.(gen, sel);
 
   // ---- header
   out.push(
@@ -628,84 +650,8 @@ export function generate(
     );
   }
 
-  // ---- Magnum (Kubernetes) cluster templates and clusters
-  /** Magnum keeps what it was given: an ID of a visible network, else a name. */
-  const mgNet = (v?: string | null) => (!v ? null : input.networks.some((n) => n.id === v) ? netExpr(v) : str(v));
-  const mgSubnet = (v?: string | null) => (!v ? null : input.subnets.some((n) => n.id === v) ? refText(T.subnet, v) : str(v));
-  const mgKeypair = (v?: string | null) => (!v ? null : nm.get(T.keypair, v) ? `${T.keypair}.${nm.get(T.keypair, v)}.name` : str(v));
-  const mgImage = (v: string) => (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v) ? lookImage(v) : str(v));
-  const labelMap = (l?: Record<string, unknown> | null) => {
-    const m = Object.fromEntries(Object.entries(l ?? {}).map(([k, v]) => [k, String(v)]));
-    return Object.keys(m).length ? map(m) : null;
-  };
-  const bool = (b?: boolean | null) => (b === undefined || b === null ? null : String(b));
-  const num = (n?: number | null) => (n === undefined || n === null ? null : String(n));
-  if (clusterTemplates.length) section("Kubernetes cluster templates (Magnum)");
-  for (const t of clusterTemplates) {
-    const labels = labelMap(t.labels);
-    block(
-      T.clusterTemplate,
-      nm.get(T.clusterTemplate, t.uuid)!,
-      [
-        ...attrs([
-          ["name", str(t.name)],
-          ["coe", str(t.coe)],
-          ["image", mgImage(t.image_id)],
-          ["keypair_id", mgKeypair(t.keypair_id)],
-          ["external_network_id", mgNet(t.external_network_id)],
-          ["fixed_network", mgNet(t.fixed_network)],
-          ["fixed_subnet", mgSubnet(t.fixed_subnet)],
-          ["flavor", t.flavor_id ? str(t.flavor_id) : null],
-          ["master_flavor", t.master_flavor_id ? str(t.master_flavor_id) : null],
-          ["dns_nameserver", t.dns_nameserver ? str(t.dns_nameserver) : null],
-          ["network_driver", t.network_driver ? str(t.network_driver) : null],
-          ["volume_driver", t.volume_driver ? str(t.volume_driver) : null],
-          ["docker_volume_size", num(t.docker_volume_size)],
-          ["docker_storage_driver", t.docker_storage_driver ? str(t.docker_storage_driver) : null],
-          ["server_type", t.server_type ? str(t.server_type) : null],
-          ["master_lb_enabled", bool(t.master_lb_enabled)],
-          ["floating_ip_enabled", bool(t.floating_ip_enabled)],
-          ["tls_disabled", t.tls_disabled ? "true" : null],
-          ["registry_enabled", t.registry_enabled ? "true" : null],
-          ["public", t.public ? "true" : null],
-          ["hidden", t.hidden ? "true" : null],
-        ]),
-        ...(labels ? ["", `labels = ${labels.join("\n  ")}`] : []),
-      ],
-      t.uuid,
-    );
-  }
-  if (clusters.length) section("Kubernetes clusters (Magnum)");
-  for (const c of clusters) {
-    const labels = labelMap(c.labels);
-    const tpl = nm.get(T.clusterTemplate, c.cluster_template_id);
-    const tplName = input.clustertemplates?.find((x) => x.uuid === c.cluster_template_id)?.name;
-    block(
-      T.cluster,
-      nm.get(T.cluster, c.uuid)!,
-      [
-        ...attrs([
-          ["name", str(c.name)],
-          ["cluster_template_id", tpl ? `${T.clusterTemplate}.${tpl}.id` : literal ? `${str(c.cluster_template_id)}${tplName ? ` # ${note(tplName)}` : ""}` : variable("cluster_template", c.cluster_template_id, tplName)],
-          ["master_count", String(c.master_count)],
-          ["node_count", String(c.node_count)],
-          ["keypair", mgKeypair(c.keypair)],
-          ["flavor", c.flavor_id ? str(c.flavor_id) : null],
-          ["master_flavor", c.master_flavor_id ? str(c.master_flavor_id) : null],
-          ["docker_volume_size", num(c.docker_volume_size)],
-          ["create_timeout", num(c.create_timeout)],
-          ["fixed_network", mgNet(c.fixed_network)],
-          ["fixed_subnet", mgSubnet(c.fixed_subnet)],
-          ["floating_ip_enabled", bool(c.floating_ip_enabled)],
-          ["master_lb_enabled", bool(c.master_lb_enabled)],
-        ]),
-        // Magnum returns the cluster's effective labels (template's plus its own).
-        ...(labels ? ["", `labels = ${labels.join("\n  ")}`] : []),
-      ],
-      c.uuid,
-      ["merge_labels", "create_timeout"],
-    );
-  }
+  // ---- what the extensions export
+  for (const e of exts) e.generate(gen, sel);
 
   if (!count) return { hcl: "", resources: 0, notes };
   if (looked.length) {

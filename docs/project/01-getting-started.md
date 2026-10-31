@@ -87,7 +87,13 @@ The fastest way to go anywhere.
 2. Type a few letters:
    - a page name (`volumes`, `routers`) to open it,
    - an action (`launch`, `create network`, `allocate floating ip`, `dark theme`, `sign out`),
-   - a resource name (`web-01`) or paste a resource UUID to open its detail page.
+   - a resource name (`web-01`), an IP address or a CIDR, or paste a resource UUID, to open it. Every kind of
+     resource is searched: instances, images, flavors, key pairs, server groups, volumes, volume snapshots,
+     backups and groups, networks, subnets, ports, routers, security groups, floating IPs, trunks, QoS
+     policies, subnet pools, secrets, secret containers, orders and object containers — plus projects, users,
+     groups and volume types in the admin view, and load balancers, DNS zones and Kubernetes clusters when the
+     cloud has those services. A resource without a page of its own (a snapshot, a port…) opens its list,
+     filtered to it.
 3. Use **↑ ↓** to move and **Enter** to open. **Esc** closes the palette.
 
 ![Command palette](../images/project/palette.png)

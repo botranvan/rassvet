@@ -133,11 +133,13 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *D
 - Several clouds in one session: sign in to another cloud from the top bar and switch between them without
   signing in again; each browser tab can work on a different cloud.
 - Command palette (Ctrl/⌘ K): jump to any page, run quick actions (launch, create, switch cloud, project,
-  region or view, theme, language) and find instances, volumes, networks, routers, security groups and images by name
+  region or view, theme, language) and find any resource (instances, volumes, snapshots, backups, networks,
+  subnets, ports, floating IPs, secrets, containers, load balancers, DNS zones, Kubernetes clusters…) by name
   or pasted ID.
 - Cleanup: finds unattached volumes, volumes in error, old snapshots, unused floating IPs, detached ports,
   unused security groups, instances in error or stopped for long, empty routers, networks without ports,
-  failed Kubernetes clusters and unused cluster templates, and removes them in bulk.
+  failed Kubernetes clusters and unused cluster templates, load balancers in error or without listeners, DNS
+  zones in error, and removes them in bulk.
 - Export to Terraform: pick resources (including Kubernetes clusters and templates) and get `main.tf` for the OpenStack provider, with resources you don't
   export looked up by name and optional `import` blocks to adopt what already exists.
 - Overview: quota usage for Nova, Cinder and Neutron.

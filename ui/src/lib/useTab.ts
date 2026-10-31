@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 
 /** Current tab kept in the URL (`?tab=ports`) so it survives reloads and can be linked to. */
@@ -38,4 +38,34 @@ export function useNewParam(open: (v: true) => void) {
       { replace: true },
     );
   }, [want]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+/**
+ * `?find=<id or name>` (command palette results of list pages without a detail page): the
+ * starting search of a list, read once, then dropped from the URL so it doesn't stick.
+ */
+export function useFindParam(): string {
+  const [params, setParams] = useSearchParams();
+  const [find] = useState(() => params.get("find") ?? "");
+  useEffect(() => {
+    if (!params.has("find")) return;
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        next.delete("find");
+        return next;
+      },
+      { replace: true },
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return find;
+}
+
+/** The filter a `?find=` value starts a paged list with: by ID for a UUID, else by name. */
+export function findFilter(find: string, filters?: { key: string }[]) {
+  if (!find || !filters) return null;
+  const key = UUID.test(find) && filters.some((f) => f.key === "id") ? "id" : filters.some((f) => f.key === "name") ? "name" : null;
+  return key ? { key, value: find } : null;
 }

@@ -8,6 +8,7 @@ import type { Status } from "@/components/ui";
 import { ApiError, api } from "./api";
 import { limiter } from "./limiter";
 import { usePref } from "./prefs";
+import { findFilter, useFindParam } from "./useTab";
 import { lang, tr } from "@/lib/i18n";
 
 /** Core services, or `ext:<id>` for an extension's own allowlisted gateway (`/api/ext/<id>/os/...`). */
@@ -200,8 +201,9 @@ export function useOsPaged<T extends { id: string }>(
   // The last filter and sort of this table come back when the user returns to the page.
   const [saved, save] = usePref<{ filter?: { key: string; value: string }; sort?: { key: string; dir: 1 | -1 } | null }>(opts.tableId && `paged.${opts.tableId}`);
   const known = (k?: string) => !!k && !!opts.filters?.some((f) => f.key === k);
-  const [filter, setFilterState] = useState<{ key: string; value: string }>(() =>
-    known(saved?.filter?.key) ? saved!.filter! : { key: opts.filters?.[0]?.key ?? "", value: "" },
+  const find = useFindParam();
+  const [filter, setFilterState] = useState<{ key: string; value: string }>(
+    () => findFilter(find, opts.filters) ?? (known(saved?.filter?.key) ? saved!.filter! : { key: opts.filters?.[0]?.key ?? "", value: "" }),
   );
   const [sort, setSortState] = useState<{ key: string; dir: 1 | -1 } | null>(() => (saved?.sort && opts.sort?.[saved.sort.key] ? saved.sort : null));
   const page = markers.length - 1;
