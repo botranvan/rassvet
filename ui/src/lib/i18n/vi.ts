@@ -4692,6 +4692,8 @@ const vi: Record<string, string> = {
   "Volume backup": "Bản sao lưu ổ đĩa",
   "Zones Designate couldn't create, update or push to its name servers. They still count against the zone quota.": "Vùng mà Designate không tạo, cập nhật hoặc đẩy lên name server được. Chúng vẫn tính vào hạn mức vùng.",
   "{n} record sets": "{n} record set",
+  "Load balancers (with listeners, pools and members)": "Load balancer (kèm listener, pool và member)",
+  "{l} listener(s), {p} pool(s), {m} member(s)": "{l} listener, {p} pool, {m} member",
 };
 
 export default vi;
