@@ -6,6 +6,7 @@ members = [
     "crates/server",
     "extensions/octavia",
     "extensions/magnum",
+    "extensions/designate",
 ]
 
 [workspace.package]
@@ -19,6 +20,7 @@ rassvet-os-client = { path = "crates/os-client" }
 rassvet-ext-api = { path = "crates/ext-api" }
 rassvet-ext-octavia = { path = "extensions/octavia" }
 rassvet-ext-magnum = { path = "extensions/magnum" }
+rassvet-ext-designate = { path = "extensions/designate" }
 
 anyhow = "1"
 base64 = "0.22"

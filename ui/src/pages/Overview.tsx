@@ -18,6 +18,7 @@ const CORE: { name: string; project: string; types: string[]; icon: string }[] =
   // Managed through extensions.
   { name: "Load balancing", project: "Octavia", types: ["load-balancer"], icon: "split" },
   { name: "Kubernetes", project: "Magnum", types: ["container-infra"], icon: "container" },
+  { name: "DNS", project: "Designate", types: ["dns"], icon: "globe" },
 ];
 
 export default function Overview({ session }: { session: SessionInfo }) {

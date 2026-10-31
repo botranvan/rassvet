@@ -15,5 +15,7 @@ pub fn registered() -> Vec<Arc<dyn Extension>> {
     v.push(Arc::new(rassvet_ext_octavia::Octavia));
     #[cfg(feature = "ext-magnum")]
     v.push(Arc::new(rassvet_ext_magnum::Magnum));
+    #[cfg(feature = "ext-designate")]
+    v.push(Arc::new(rassvet_ext_designate::Designate));
     v
 }
