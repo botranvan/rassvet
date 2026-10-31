@@ -83,11 +83,13 @@ function useResourceSearch(q: string, kinds: Searched[], key: unknown) {
       const named = (i: number, rows: unknown[]) => rows.filter((r) => ((kinds[i].k.name ?? defName)(r as never) ?? "").toLowerCase().includes(needle));
       await Promise.allSettled(
         kinds.map(({ k, c }, i) => {
-          if (k.search) return k.search(q, { ...c, signal }).then((rows) => add(i, named(i, rows)));
-          if (!k.list) return undefined;
-          return qc
-            .fetchQuery({ queryKey: ["palette-list", k.kind, c.base, c.admin, c.project], queryFn: () => k.list!(c), staleTime: 60_000 })
-            .then((rows) => add(i, named(i, rows)));
+          const listed = () =>
+            qc
+              .fetchQuery({ queryKey: ["palette-list", k.kind, c.base, c.admin, c.project], queryFn: () => k.list!(c), staleTime: 60_000 })
+              .then((rows) => add(i, named(i, rows)));
+          // A kind with both searches by name and lists when the API refuses that filter.
+          if (k.search) return k.search(q, { ...c, signal }).then((rows) => add(i, named(i, rows)), (e) => (k.list && !signal.aborted ? listed() : Promise.reject(e)));
+          return k.list ? listed() : undefined;
         }),
       );
       return out.flat();

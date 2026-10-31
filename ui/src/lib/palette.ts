@@ -30,7 +30,7 @@ export interface ResourceKind<R = any> {
   get?: (id: string, c: PaletteContext) => Promise<R | null | undefined>;
   /** Rows whose name may contain `q`, filtered by the API; they are matched again here. */
   search?: (q: string, c: PaletteContext) => Promise<R[]>;
-  /** Without `search`: every row (cached for a minute per view), matched by name here. */
+  /** Every row (cached for a minute per view), matched by name here: without `search`, or when it fails. */
   list?: (c: PaletteContext) => Promise<R[]>;
   /** Default `r.id`. */
   id?: (r: R) => string;
@@ -117,6 +117,8 @@ export const CORE_RESOURCES: ResourceKind[] = [
     services: VOLUME,
     get: one("volume", "volumes", "volume"),
     search: (q, c) => os.get<{ volumes: Row[] }>("volume", "volumes", { ...all(c), "name~": q, limit: 8 }, sig(c)).then((r) => r.volumes),
+    // Clouds without Cinder's `name~` (before 3.34, or not in its resource filters).
+    list: (c) => os.list<Row>("volume", "volumes", "volumes", all(c)),
     path: (r: Row) => `/storage/volumes/${r.id}`,
   },
   {
@@ -125,6 +127,8 @@ export const CORE_RESOURCES: ResourceKind[] = [
     services: VOLUME,
     get: one("volume", "snapshots", "snapshot"),
     search: (q, c) => os.get<{ snapshots: Row[] }>("volume", "snapshots", { ...all(c), "name~": q, limit: 8 }, sig(c)).then((r) => r.snapshots),
+    // Clouds without Cinder's `name~` (before 3.34, or not in its resource filters).
+    list: (c) => os.list<Row>("volume", "snapshots", "snapshots", all(c)),
     path: (r: Row) => findPath("/storage/snapshots", r.id),
   },
   {
@@ -133,6 +137,8 @@ export const CORE_RESOURCES: ResourceKind[] = [
     services: VOLUME,
     get: one("volume", "backups", "backup"),
     search: (q, c) => os.get<{ backups: Row[] }>("volume", "backups", { ...all(c), "name~": q, limit: 8 }, sig(c)).then((r) => r.backups),
+    // Clouds without Cinder's `name~` (before 3.34, or not in its resource filters).
+    list: (c) => os.list<Row>("volume", "backups", "backups", all(c)),
     path: (r: Row) => findPath("/storage/backups", r.id),
   },
   {

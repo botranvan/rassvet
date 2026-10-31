@@ -3,7 +3,7 @@ import { Link } from "@/components/Link";
 import { type Column, DataTable } from "@/components/DataTable";
 import { ErrorNotice, PageHeader, StatusDot } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
-import { SNAPSHOT_STATUSES, choice, filters, text, idFilter } from "@/lib/filters";
+import { SNAPSHOT_STATUSES, choice, filters, idFilter, cinderName } from "@/lib/filters";
 import { type Snapshot, os, useInvalidate, useOsPaged, useVolumes, volumeStatus } from "@/lib/os";
 import { useSnapshotActions } from "./volumeActions";
 import { tr, trx } from "@/lib/i18n";
@@ -12,7 +12,7 @@ export default function Snapshots() {
   const volumes = useVolumes();
   const snapshots = useOsPaged<Snapshot>("volume", "snapshots/detail", "snapshots", {}, {
     filters: filters(
-      text("name", tr("Name"), "name~", tr("Name contains…")),
+      cinderName(),
       idFilter("snapshots", "snapshot"),
       choice("status", tr("Status"), "status", SNAPSHOT_STATUSES),
       { key: "volume", label: tr("Volume"), param: "volume_id", options: (volumes.data ?? []).map((v) => ({ value: v.id, label: v.name || v.id, description: tr("{size} GiB", { size: v.size }) })) },

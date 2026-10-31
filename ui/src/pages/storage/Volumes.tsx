@@ -4,7 +4,7 @@ import { Link } from "@/components/Link";
 import { type Column, DataTable } from "@/components/DataTable";
 import { Button, ErrorNotice, Icon, PageHeader, StatusDot } from "@/components/ui";
 import { useProjects } from "@/lib/identity";
-import { VOLUME_STATUSES, choice, filters, text, useProjectFilter, useZoneFilter, idFilter } from "@/lib/filters";
+import { VOLUME_STATUSES, choice, filters, useProjectFilter, useZoneFilter, idFilter, cinderName } from "@/lib/filters";
 import { type Volume, os, useInvalidate, useListOrPages, volumeBusy, volumeStatus } from "@/lib/os";
 import { AcceptTransferDialog } from "./Transfers";
 import { CreateVolumeDialog, useServerNames, useVolumeActions } from "./volumeActions";
@@ -17,7 +17,7 @@ export default function Volumes({ admin = false }: { admin?: boolean }) {
   const filterZone = useZoneFilter("volume");
   const volumes = useListOrPages<Volume>(true, "volume", "volumes/detail", "volumes", admin ? { all_tenants: 1 } : undefined, {
     filters: filters(
-      text("name", tr("Name"), "name~", tr("Name contains…")),
+      cinderName(),
       idFilter("volumes", "volume"),
       filterProject,
       choice("status", tr("Status"), "status", VOLUME_STATUSES),
