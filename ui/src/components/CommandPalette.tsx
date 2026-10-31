@@ -11,7 +11,7 @@ import { useNavigate } from "@/components/Link";
 import { Icon } from "@/components/ui";
 import { LANGS, lang, setLang, tr } from "@/lib/i18n";
 import { extBase, useExtensionUis } from "@/extensions";
-import { CORE_RESOURCES, type Found, type PaletteContext, type ResourceKind } from "@/lib/palette";
+import { CORE_RESOURCES, type Found, type PaletteContext, type ResourceKind, parseScope } from "@/lib/palette";
 import { type NavItem, type SessionInfo, useLogout, useNav, useSwitchCloud, useSwitchProject, useSwitchRegion } from "@/lib/session";
 import { toggleSidebar } from "@/lib/sidebar";
 import { useTheme } from "@/lib/theme";
@@ -58,18 +58,20 @@ const defName = (r: { name?: string | null }) => r.name;
  * the enabled extensions. Each kind is asked separately; failures (a 404, a service that
  * refuses) are skipped. Kinds without a name filter in their API list once and are cached.
  */
-function useResourceSearch(q: string, kinds: Searched[], key: unknown) {
+function useResourceSearch(q: string, kinds: Searched[], key: unknown, enabled: boolean) {
   const qc = useQueryClient();
   return useQuery({
     queryKey: ["palette", q, key],
-    enabled: q.length >= 2,
+    enabled,
     staleTime: 30_000,
     queryFn: async ({ signal }): Promise<Found[]> => {
+      // A search scoped to one kind (`vol:db`) shows more of it.
+      const perKind = kinds.length === 1 ? 30 : 8;
       // One bucket per kind keeps the results in a stable order whatever answers first.
       const out: Found[][] = kinds.map(() => []);
       const add = (i: number, rows: unknown[]) => {
         const { k, c } = kinds[i];
-        for (const r of rows.filter((x) => x && (!k.keep || k.keep(x, c))).slice(0, 8)) {
+        for (const r of rows.filter((x) => x && (!k.keep || k.keep(x, c))).slice(0, perKind)) {
           const id = (k.id ?? defId)(r as never);
           out[i].push({ kind: k.kind, icon: k.icon, id, name: (k.name ?? defName)(r as never) || id, path: k.path(r, c) });
         }
@@ -153,7 +155,11 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       ...(exts ?? []).flatMap((e) => (e.ui.palette?.resources ?? []).filter(ok).map((k) => ({ k, c: { ...c, base: extBase(e.id, view) } }))),
     ];
   }, [exts, view, session.project?.id, services]);
-  const found = useResourceSearch(debounced, kinds, [view, session.project?.id, exts?.map((e) => e.id)]);
+  // `<kind>:<name>` (e.g. `vol:db`, `instances:web`) searches only that kind, by name or ID.
+  const scope = useMemo(() => parseScope(debounced, kinds.map((x) => x.k)), [debounced, kinds]);
+  const scoped = useMemo(() => (scope ? scope.kinds.map((i) => kinds[i]) : kinds), [scope, kinds]);
+  const term = scope ? scope.q : debounced;
+  const found = useResourceSearch(term, scoped, [view, session.project?.id, exts?.map((e) => e.id), scope?.kinds], scope ? true : term.length >= 2);
 
   const done = (f: () => void) => () => {
     onClose();
@@ -217,6 +223,9 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
   }, [nav.data, session, admin, exts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim();
+  /** The kinds a typed `<kind>:` prefix names (before the debounce settles too), for the header. */
+  const typedScope = useMemo(() => parseScope(query, kinds.map((x) => x.k)), [query, kinds]);
+  const scopeLabel = typedScope ? [...new Set(typedScope.kinds.map((i) => kinds[i].k.kind))].join(", ") : "";
   const results = useMemo(() => {
     const ranked = commands
       .map((c, i) => ({ c, s: score(c, query), i }))
@@ -226,21 +235,30 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
     // Without a query: actions first, then pages; clouds/projects/regions only when searched.
     const shown = query ? ranked.slice(0, 40) : [...ranked.filter((c) => c.group === tr("Actions")).slice(0, 6), ...ranked.filter((c) => c.group === tr("Go to")).slice(0, 8)];
     const res: Cmd[] =
-      query.length >= 2 && debounced === query
-        ? (found.data ?? []).map((f) => ({ id: `res:${f.kind}:${f.id}`, group: tr("Resources"), label: f.name, hint: f.kind, icon: f.icon, run: done(() => goRes(f.path)) }))
+      (typedScope || query.length >= 2) && debounced === query
+        ? (found.data ?? []).map((f) => ({
+            id: `res:${f.kind}:${f.id}`,
+            group: typedScope ? `${tr("Resources")} · ${scopeLabel}` : tr("Resources"),
+            label: f.name,
+            hint: f.kind,
+            icon: f.icon,
+            run: done(() => goRes(f.path)),
+          }))
         : [];
+    // A scoped search shows resources only.
+    if (typedScope) return res;
     // One block per group, groups in the order of their best match.
     const groups = new Map<string, Cmd[]>();
     for (const c of UUID.test(query) ? [...res, ...shown] : [...shown, ...res]) groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
     return [...groups.values()].flat();
-  }, [commands, query, debounced, found.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [commands, query, debounced, found.data, typedScope, scopeLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setActive(0), [query]);
   useEffect(() => {
     listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const searching = query.length >= 2 && (debounced !== query || found.isFetching);
+  const searching = (!!typedScope || query.length >= 2) && (debounced !== query || found.isFetching);
   let lastGroup = "";
   const rows: ReactNode[] = [];
   results.forEach((c, i) => {
@@ -290,7 +308,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
               results[active]?.run();
             }
           }}
-          placeholder={tr("Search pages, actions, or resources by name or ID…")}
+          placeholder={tr("Search pages, actions, or resources by name or ID")}
           aria-label={tr("Search")}
           role="combobox"
           aria-expanded
@@ -301,12 +319,14 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
         <kbd className="shrink-0 rounded border border-line px-1.5 py-0.5 font-mono text-[11px] text-muted">Esc</kbd>
       </div>
       <div ref={listRef} id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {rows.length ? rows : <p className="px-3 py-6 text-center text-sm text-muted">{searching ? tr("Searching…") : tr("Nothing matches “{q}”.", { q: query })}</p>}
+        {rows.length ? rows : <p className="px-3 py-6 text-center text-sm text-muted">{searching ? tr("Searching…") : typedScope ? tr("No {kind} matches “{q}”.", { kind: scopeLabel, q: typedScope.q }) : tr("Nothing matches “{q}”.", { q: query })}</p>}
       </div>
       <div className="flex gap-4 border-t border-line px-4 py-2 text-xs text-muted">
         <span>↑ ↓ {tr("to move")}</span>
         <span>↵ {tr("to open")}</span>
-        <span className="ml-auto">{tr("Names or a pasted UUID find resources")}</span>
+        <span className="ml-auto truncate">
+          {typedScope ? tr("Only {kind}", { kind: scopeLabel }) : tr("Names or a pasted UUID find resources; vol:name searches one kind")}
+        </span>
       </div>
     </div>
   );

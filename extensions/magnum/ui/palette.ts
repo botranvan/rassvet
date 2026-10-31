@@ -15,6 +15,7 @@ export const palette: PaletteContribution = {
   resources: [
     {
       kind: tr("Kubernetes cluster"),
+    aliases: ["cluster", "k8s", "kubernetes", "coe"],
       icon: "container",
       get: (id, c) => os.get<Row>("ext:magnum", `clusters/${enc(id)}`, undefined, { signal: c.signal }),
       list: () => os.list<Row>("ext:magnum", "clusters/detail", "clusters"),
@@ -24,6 +25,7 @@ export const palette: PaletteContribution = {
     },
     {
       kind: tr("Cluster template"),
+    aliases: ["template", "cluster-template", "ct"],
       icon: "file-code",
       get: (id, c) => os.get<Row>("ext:magnum", `clustertemplates/${enc(id)}`, undefined, { signal: c.signal }),
       list: () => os.list<Row>("ext:magnum", "clustertemplates", "clustertemplates"),

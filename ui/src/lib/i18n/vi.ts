@@ -284,7 +284,7 @@ const vi: Record<string, string> = {
   "S3 tools (aws, s3cmd, rclone) use an access key instead:": "Công cụ S3 (aws, s3cmd, rclone) dùng access key thay thế:",
   "Search and commands": "Tìm kiếm và lệnh",
   "Search pages, actions and resources ({key})": "Tìm trang, thao tác và tài nguyên ({key})",
-  "Search pages, actions, or resources by name or ID…": "Tìm trang, thao tác, hoặc tài nguyên theo tên hay ID…",
+  "Search pages, actions, or resources by name or ID": "Tìm trang, thao tác, hoặc tài nguyên theo tên hay ID",
   "Searching…": "Đang tìm…",
   "Secret key": "Secret key",
   "Secure Boot": "Secure Boot",
@@ -4692,6 +4692,9 @@ const vi: Record<string, string> = {
   "Volume backup": "Bản sao lưu ổ đĩa",
   "Zones Designate couldn't create, update or push to its name servers. They still count against the zone quota.": "Vùng mà Designate không tạo, cập nhật hoặc đẩy lên name server được. Chúng vẫn tính vào hạn mức vùng.",
   "{n} record sets": "{n} record set",
+  "No {kind} matches “{q}”.": "Không có {kind} nào khớp “{q}”.",
+  "Only {kind}": "Chỉ {kind}",
+  "Names or a pasted UUID find resources; vol:name searches one kind": "Tên hoặc UUID tìm tài nguyên; vol:tên chỉ tìm một loại",
   "Load balancers (with listeners, pools and members)": "Load balancer (kèm listener, pool và member)",
   "{l} listener(s), {p} pool(s), {m} member(s)": "{l} listener, {p} pool, {m} member",
 };

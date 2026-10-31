@@ -16,6 +16,7 @@ export const palette: PaletteContribution = {
   resources: [
     {
       kind: tr("Load balancer"),
+    aliases: ["lb", "loadbalancer", "load-balancer"],
       icon: "split",
       get: get("loadbalancers", "loadbalancer"),
       list: (c) => os.list<Row>(LB, "lbaas/loadbalancers", "loadbalancers", scope(c)),
@@ -25,6 +26,7 @@ export const palette: PaletteContribution = {
     },
     {
       kind: tr("Listener"),
+    aliases: ["listener"],
       icon: "radio-tower",
       get: get("listeners", "listener"),
       list: (c) => os.list<Row>(LB, "lbaas/listeners", "listeners", scope(c)),
@@ -33,6 +35,7 @@ export const palette: PaletteContribution = {
     },
     {
       kind: tr("Pool"),
+    aliases: ["pool", "lb-pool"],
       icon: "layers",
       get: get("pools", "pool"),
       list: (c) => os.list<Row>(LB, "lbaas/pools", "pools", scope(c)),

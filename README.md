@@ -159,7 +159,7 @@ extensions/<id>/ui/
 
 - **Command palette** — `keywords` (extra words that find the extension's pages), `actions` ("Create …"
   entries; `path` is relative to `/ext/<id>`) and `resources`: one `ResourceKind` per kind of resource, with
-  `get(id)` to find it by a pasted UUID, `search(q)` (the API filters names) or `list()` (cached, matched
+  `aliases` (for `<alias>:<name>` searches, e.g. `vol:db`), `get(id)` to find it by a pasted UUID, `search(q)` (the API filters names) or `list()` (cached, matched
   here), and `path(row, ctx)` to open it (`ctx.base` is `/ext/<id>` or `/admin/ext/<id>`). The host's own
   kinds are in `ui/src/lib/palette.ts`; a list page without a detail page can be opened on one row with
   `findPath(list, id)` (`?find=<id>`).

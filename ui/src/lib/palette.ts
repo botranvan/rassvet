@@ -22,6 +22,11 @@ export interface ResourceKind<R = any> {
   /** Shown next to each result, e.g. "Volume snapshot". */
   kind: string;
   icon: string;
+  /**
+   * Names for `<alias>:<name>` in the palette (e.g. `vol:db` searches only volumes), English,
+   * lower case; the first is the one shown. A prefix of an alias works too, as does a plural.
+   */
+  aliases?: string[];
   /** Catalog service types; the kind is searched when any of them is in the region. */
   services?: string[];
   /** Only in this view (default: both). */
@@ -70,6 +75,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ compute
   {
     kind: tr("Instance"),
+    aliases: ["instance", "server", "vm", "ins", "in"],
     icon: "server",
     services: ["compute"],
     get: one("compute", "servers", "server"),
@@ -78,6 +84,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Image"),
+    aliases: ["image", "img"],
     icon: "disc-3",
     services: ["image"],
     // Glance goes through Rassvet's image API (not the generic gateway).
@@ -87,6 +94,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Flavor"),
+    aliases: ["flavor", "fl"],
     icon: "cpu",
     services: ["compute"],
     get: one("compute", "flavors", "flavor"),
@@ -95,6 +103,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Key pair"),
+    aliases: ["keypair", "key", "kp"],
     icon: "key-round",
     services: ["compute"],
     view: "project",
@@ -104,6 +113,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Server group"),
+    aliases: ["server-group", "sg-server"],
     icon: "group",
     services: ["compute"],
     get: one("compute", "os-server-groups", "server_group"),
@@ -113,6 +123,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ block storage
   {
     kind: tr("Volume"),
+    aliases: ["volume", "vol", "disk"],
     icon: "hard-drive",
     services: VOLUME,
     get: one("volume", "volumes", "volume"),
@@ -123,6 +134,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Volume snapshot"),
+    aliases: ["snapshot", "snap", "volume-snapshot"],
     icon: "camera",
     services: VOLUME,
     get: one("volume", "snapshots", "snapshot"),
@@ -133,6 +145,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Volume backup"),
+    aliases: ["backup", "bak", "volume-backup"],
     icon: "archive-restore",
     services: VOLUME,
     get: one("volume", "backups", "backup"),
@@ -143,6 +156,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Volume group"),
+    aliases: ["volume-group", "vg"],
     icon: "layers",
     services: VOLUME,
     get: one("volume", "groups", "group"),
@@ -151,6 +165,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Group snapshot"),
+    aliases: ["group-snapshot"],
     icon: "camera",
     services: VOLUME,
     get: one("volume", "group_snapshots", "group_snapshot"),
@@ -159,6 +174,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Volume type"),
+    aliases: ["volume-type", "vt"],
     icon: "layers",
     services: VOLUME,
     view: "admin",
@@ -169,6 +185,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ network (Neutron can't search names: lists are cached)
   {
     kind: tr("Network"),
+    aliases: ["network", "net"],
     icon: "network",
     services: ["network"],
     get: one("network", "networks", "network"),
@@ -177,6 +194,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Subnet"),
+    aliases: ["subnet", "sn", "cidr"],
     icon: "network",
     services: ["network"],
     get: one("network", "subnets", "subnet"),
@@ -187,6 +205,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Port"),
+    aliases: ["port"],
     icon: "ethernet-port",
     services: ["network"],
     get: one("network", "ports", "port"),
@@ -195,6 +214,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Router"),
+    aliases: ["router", "rt"],
     icon: "router",
     services: ["network"],
     get: one("network", "routers", "router"),
@@ -203,6 +223,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Security group"),
+    aliases: ["security-group", "sg", "secgroup"],
     icon: "shield",
     services: ["network"],
     get: one("network", "security-groups", "security_group"),
@@ -211,6 +232,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Floating IP"),
+    aliases: ["fip", "floating-ip", "floatingip", "ip"],
     icon: "globe",
     services: ["network"],
     get: one("network", "floatingips", "floatingip"),
@@ -221,6 +243,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Trunk"),
+    aliases: ["trunk"],
     icon: "cable",
     services: ["network"],
     get: one("network", "trunks", "trunk"),
@@ -229,6 +252,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("QoS policy"),
+    aliases: ["qos", "qos-policy"],
     icon: "gauge",
     services: ["network"],
     get: one("network", "qos/policies", "policy"),
@@ -237,6 +261,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Subnet pool"),
+    aliases: ["subnet-pool", "pool-subnet"],
     icon: "boxes",
     services: ["network"],
     get: one("network", "subnetpools", "subnetpool"),
@@ -246,6 +271,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ key manager (project pages only)
   {
     kind: tr("Secret"),
+    aliases: ["secret"],
     icon: "key-round",
     services: ["key-manager"],
     view: "project",
@@ -255,6 +281,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Secret container"),
+    aliases: ["container", "secret-container"],
     icon: "package",
     services: ["key-manager"],
     view: "project",
@@ -264,6 +291,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Order"),
+    aliases: ["order"],
     icon: "list-checks",
     services: ["key-manager"],
     view: "project",
@@ -277,6 +305,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ object storage
   {
     kind: tr("Object container"),
+    aliases: ["bucket", "object-container", "swift"],
     icon: "archive",
     services: ["object-store"],
     view: "project",
@@ -287,6 +316,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   // ------------------------------------------------------------------ identity (admin view)
   {
     kind: tr("Project"),
+    aliases: ["project", "proj", "tenant"],
     icon: "folder",
     view: "admin",
     get: (id, c) => api.get<{ project: Row }>(`/identity/admin/projects/${enc(id)}`, sig(c)).then((r) => r.project),
@@ -295,6 +325,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("User"),
+    aliases: ["user"],
     icon: "users-round",
     view: "admin",
     get: (id, c) => api.get<{ user: Row }>(`/identity/admin/users/${enc(id)}`, sig(c)).then((r) => r.user),
@@ -303,6 +334,7 @@ export const CORE_RESOURCES: ResourceKind[] = [
   },
   {
     kind: tr("Group"),
+    aliases: ["group"],
     icon: "users",
     view: "admin",
     get: one("identity", "groups", "group"),
@@ -310,3 +342,18 @@ export const CORE_RESOURCES: ResourceKind[] = [
     path: (r: Row) => `/admin/identity/groups/${r.id}`,
   },
 ];
+
+/**
+ * `vol:db` → the kinds `vol` names and the name to search (`db`, may be empty). The prefix
+ * may be an alias, its plural or the start of one; the closest aliases win, so `vol` is
+ * volumes, not volume types. Null when the query has no prefix or it names no kind.
+ */
+export function parseScope(query: string, kinds: { aliases?: string[] }[]): { kinds: number[]; q: string } | null {
+  const m = /^([a-z][a-z0-9-]*)\s*:\s*(.*)$/i.exec(query);
+  if (!m) return null;
+  const p = m[1].toLowerCase();
+  const fit = kinds.map((k) => Math.min(...(k.aliases ?? []).flatMap((a) => [a, `${a}s`]).filter((a) => a.startsWith(p)).map((a) => a.length)));
+  const best = Math.min(...fit);
+  if (!Number.isFinite(best)) return null;
+  return { kinds: fit.flatMap((f, i) => (f === best ? [i] : [])), q: m[2].trim() };
+}

@@ -14,6 +14,7 @@ export const palette: PaletteContribution = {
   resources: [
     {
       kind: tr("DNS zone"),
+    aliases: ["zone", "dns", "domain"],
       icon: "globe",
       get: (id, c) => os.get<Zone>(DNS, `zones/${enc(id)}`, all(c), { signal: c.signal }),
       search: (q, c) => os.get<{ zones: Zone[] }>(DNS, "zones", { ...all(c), name: like(q), limit: 8 }, { signal: c.signal }).then((r) => r.zones),
@@ -21,6 +22,7 @@ export const palette: PaletteContribution = {
     },
     {
       kind: tr("Record set"),
+    aliases: ["record", "recordset", "rr"],
       icon: "list-checks",
       search: (q, c) => os.get<{ recordsets: RecordSet[] }>(DNS, "recordsets", { ...all(c), name: like(q), limit: 8 }, { signal: c.signal }).then((r) => r.recordsets),
       name: (r: RecordSet) => `${r.name} ${r.type}`,

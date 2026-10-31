@@ -94,6 +94,10 @@ The fastest way to go anywhere.
      groups and volume types in the admin view, and load balancers, DNS zones and Kubernetes clusters when the
      cloud has those services. A resource without a page of its own (a snapshot, a port…) opens its list,
      filtered to it.
+   - `<type>:<name>` to search one kind only: `ins:web`, `in:web` or `instances:web` finds instances named
+     like *web*, `vol:pfsense` or `volume:pfsense` volumes, `snap:`, `sg:`, `net:`, `fip:`, `lb:`, `zone:`…
+     The type can be cut short (`vol`, `inst`) or plural; with nothing after the colon it lists that kind,
+     and a pasted UUID after it looks up only that kind.
 3. Use **↑ ↓** to move and **Enter** to open. **Esc** closes the palette.
 
 ![Command palette](../images/project/palette.png)
