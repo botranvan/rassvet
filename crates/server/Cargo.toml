@@ -10,10 +10,11 @@ name = "rassvet"
 path = "src/main.rs"
 
 [features]
-default = ["ext-octavia", "ext-magnum"]
+default = ["ext-octavia", "ext-magnum", "ext-designate"]
 # One feature per extension crate under extensions/.
 ext-octavia = ["dep:rassvet-ext-octavia"]
 ext-magnum = ["dep:rassvet-ext-magnum"]
+ext-designate = ["dep:rassvet-ext-designate"]
 
 [dependencies]
 anyhow.workspace = true
@@ -28,6 +29,7 @@ mime_guess.workspace = true
 rassvet-ext-api.workspace = true
 rassvet-ext-octavia = { workspace = true, optional = true }
 rassvet-ext-magnum = { workspace = true, optional = true }
+rassvet-ext-designate = { workspace = true, optional = true }
 rassvet-os-client.workspace = true
 rand.workspace = true
 reqwest.workspace = true

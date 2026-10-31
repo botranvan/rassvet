@@ -8,7 +8,7 @@ Each page starts with the **use case** (who needs it and why), then gives **step
 
 Screenshots were taken against a lab cloud; names, sizes and addresses on your cloud will differ.
 Menu entries only appear when your cloud offers the service (for example, *Object storage* needs Swift or
-Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) and when your role is allowed to use it.
+Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *DNS zones* needs Designate) and when your role is allowed to use it.
 
 ## Project guides
 
@@ -29,6 +29,7 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
 | 13 | [Cleanup](project/13-cleanup.md) | find and remove leftovers that waste quota |
 | 14 | [Export to Terraform](project/14-export-to-terraform.md) | turn resources you built by hand into code |
 | 15 | [Kubernetes clusters](project/15-kubernetes-clusters.md) | create a Kubernetes cluster, connect with kubectl, resize and upgrade it |
+| 16 | [DNS zones](project/16-dns-zones.md) | host a domain's records, import / export zone files, set reverse DNS of floating IPs |
 
 ## Admin guides
 
@@ -43,6 +44,7 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
 | 7 | [Volume types and storage](admin/07-volume-types-storage.md) | offer storage tiers and watch backend capacity |
 | 8 | [Cleanup across projects](admin/08-cleanup-all-projects.md) | find leftovers in every project |
 | 9 | [Kubernetes service](admin/09-kubernetes-service.md) | publish cluster templates, set cluster quotas, check the Magnum services |
+| 10 | [DNS service](admin/10-dns-service.md) | allow domains (TLDs, blacklists), set DNS quotas, TSIG keys, check the Designate services |
 
 ## Features
 
@@ -119,6 +121,10 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
   credentials, delete), node groups (add, change the
   node count, autoscaler bounds) and a one-click kubeconfig (client certificate signed by the cluster CA, or
   OpenStack token sign-in), with links to the cluster's servers, network and API load balancer.
+- DNS zones (Designate extension): zones (primary or secondary), record sets with per-type hints and checks
+  (A, AAAA, CNAME, MX, TXT with automatic quoting, SRV, CAA, NS, PTR, SSHFP…), name servers to set at the
+  registrar, zone file import and export, transfers to another project (request ID + key), shares with other
+  projects (2023.1+), and reverse DNS (PTR) of floating IPs.
 - Object storage (Swift API — OpenStack Swift or Ceph RGW): containers (public or private, storage policy,
   versioning, quotas, metadata), a file browser with folders, drag-and-drop uploads, downloads, properties,
   copy/move and temporary links. EC2 credentials give S3 tools (aws, s3cmd, rclone, boto3) access, with ready
@@ -170,6 +176,8 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum) an
 - Cleanup across every project, key manager quotas and object storage accounts of any project.
 - Kubernetes (Magnum): clusters and templates of every project, public / hidden templates, cluster quotas per
   project, usage and the state of the Magnum services.
+- DNS (Designate): zones of every project (create or import for another project, abandon), TLDs, blacklists,
+  per-project DNS quotas, TSIG keys, pools and the state of the Designate services.
 - Federation (SSO): identity providers (remote IDs, domain, authorization TTL) and their protocols (openid,
   saml2, mapped, x509), mappings edited as JSON with templates and validation, Keystone-to-Keystone service
   providers. Rassvet manages federation; signing in to Rassvet itself through SSO is not built yet.

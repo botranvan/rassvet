@@ -4,7 +4,7 @@
 //! highest microversion it is written against) and the requests it allows ([`Rule`]s), then
 //! hands every request to [`proxy`]. The gateway checks the allowlist and the admin role,
 //! adds the session's token and the negotiated microversion, and can follow pagination
-//! (`?all_pages=1`, `<key>_links` or a top-level `next` link, both with markers).
+//! (`?all_pages=1`, `<key>_links`, a top-level `next` link or `links.next`, all with markers).
 
 use std::{
     collections::HashMap,
@@ -167,6 +167,9 @@ pub async fn negotiated(
 
 // ---------------------------------------------------------------------------- calls
 
+/// Extra request headers, e.g. Designate's `X-Auth-All-Projects`.
+pub type Headers<'a> = &'a [(&'static str, String)];
+
 /// Send one request (no allowlist check: for an extension's own typed routes).
 pub async fn call(
     ctx: &RequestContext,
@@ -176,12 +179,28 @@ pub async fn call(
     query: &[(String, String)],
     body: Option<&Value>,
 ) -> Result<(StatusCode, Value), ApiError> {
+    call_with(ctx, svc, method, path, query, body, &[]).await
+}
+
+/// [`call`] with extra headers.
+pub async fn call_with(
+    ctx: &RequestContext,
+    svc: &Service,
+    method: Method,
+    path: &str,
+    query: &[(String, String)],
+    body: Option<&Value>,
+    headers: Headers<'_>,
+) -> Result<(StatusCode, Value), ApiError> {
     let endpoint = ctx.endpoint(svc.service_type)?;
     let url = format!("{}/{}", svc.base_url(&endpoint), encode(path));
     let mut req = ctx
         .request(method, &url)
         .header("Accept", "application/json")
         .query(query);
+    for (name, value) in headers {
+        req = req.header(*name, value);
+    }
     if let Some(v) = negotiated(ctx, svc, &endpoint).await {
         let (name, value) = v.header(svc.service_type);
         req = req.header(name, value);
@@ -201,12 +220,16 @@ pub async fn call(
 }
 
 /// Whether a list page says there is a next one: a `<key>_links` entry with `rel: next`
-/// (Octavia, Nova style) or a non-empty top-level `next` link (Magnum style).
+/// (Octavia, Nova style), a non-empty top-level `next` link (Magnum style) or a
+/// `links: {next}` object (Designate style).
 fn has_next(page: &Value, key: &str) -> bool {
     page[format!("{key}_links")]
         .as_array()
         .is_some_and(|l| l.iter().any(|x| x["rel"] == "next"))
         || page["next"].as_str().is_some_and(|s| !s.is_empty())
+        || page["links"]["next"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
 }
 
 /// Marker for the page after `page`: the last item's `id`, else its `uuid`.
@@ -225,7 +248,18 @@ pub async fn call_all(
     path: &str,
     query: &[(String, String)],
 ) -> Result<Value, ApiError> {
-    let (_, mut first) = call(ctx, svc, Method::GET, path, query, None).await?;
+    call_all_with(ctx, svc, path, query, &[]).await
+}
+
+/// [`call_all`] with extra headers.
+pub async fn call_all_with(
+    ctx: &RequestContext,
+    svc: &Service,
+    path: &str,
+    query: &[(String, String)],
+    headers: Headers<'_>,
+) -> Result<Value, ApiError> {
+    let (_, mut first) = call_with(ctx, svc, Method::GET, path, query, None, headers).await?;
     let Some(key) = first.as_object().and_then(|o| {
         o.iter()
             .find(|(k, v)| v.is_array() && !k.ends_with("_links"))
@@ -247,7 +281,7 @@ pub async fn call_all(
             .cloned()
             .collect();
         q.push(("marker".into(), marker));
-        let (_, next) = call(ctx, svc, Method::GET, path, &q, None).await?;
+        let (_, next) = call_with(ctx, svc, Method::GET, path, &q, None, headers).await?;
         let got = next[&key].as_array().cloned().unwrap_or_default();
         if got.is_empty() {
             break;
@@ -260,6 +294,9 @@ pub async fn call_all(
         o.insert(key.clone(), Value::Array(items));
         o.remove(&format!("{key}_links"));
         o.remove("next");
+        if let Some(l) = o.get_mut("links").and_then(Value::as_object_mut) {
+            l.remove("next");
+        }
         o.insert("truncated".into(), json!(truncated));
     }
     Ok(first)
@@ -276,6 +313,33 @@ pub async fn proxy(
     svc: &Service,
     rules: &[Rule],
     check_body: Option<BodyCheck>,
+    method: Method,
+    path: &str,
+    raw_query: Vec<(String, String)>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    proxy_with(
+        ctx,
+        svc,
+        rules,
+        check_body,
+        &[],
+        method,
+        path,
+        raw_query,
+        body,
+    )
+    .await
+}
+
+/// [`proxy`] with extra headers (the extension has already checked who may send them).
+#[allow(clippy::too_many_arguments)]
+pub async fn proxy_with(
+    ctx: &RequestContext,
+    svc: &Service,
+    rules: &[Rule],
+    check_body: Option<BodyCheck>,
+    headers: Headers<'_>,
     method: Method,
     path: &str,
     raw_query: Vec<(String, String)>,
@@ -319,9 +383,9 @@ pub async fn proxy(
         tracing::info!(user = %ctx.token.user.name, service = svc.service_type, %method, %path, "change");
     }
     if all_pages && method == Method::GET {
-        return Ok(Json(call_all(ctx, svc, path, &query).await?).into_response());
+        return Ok(Json(call_all_with(ctx, svc, path, &query, headers).await?).into_response());
     }
-    let (status, value) = call(ctx, svc, method, path, &query, body.as_ref()).await?;
+    let (status, value) = call_with(ctx, svc, method, path, &query, body.as_ref(), headers).await?;
     Ok(if value.is_null() {
         status.into_response()
     } else {
@@ -379,5 +443,12 @@ mod tests {
         assert!(has_next(&magnum, "clusters"));
         assert_eq!(marker(&magnum, "clusters").as_deref(), Some("u1"));
         assert!(!has_next(&json!({"clusters": [], "next": ""}), "clusters"));
+        let designate = json!({"zones": [{"id": "z1"}], "links": {"self": "s", "next": "n"}});
+        assert!(has_next(&designate, "zones"));
+        assert_eq!(marker(&designate, "zones").as_deref(), Some("z1"));
+        assert!(!has_next(
+            &json!({"zones": [], "links": {"self": "s"}}),
+            "zones"
+        ));
     }
 }

@@ -72,6 +72,7 @@ type MgRow = { uuid: string; name?: string | null; project_id?: string | null; p
 const EXT_KEYWORDS: Record<string, string> = {
   magnum: "k8s kubernetes magnum container coe cluster",
   octavia: "lb octavia load balancer balancing listener pool vip",
+  designate: "dns designate domain zone record recordset ptr reverse",
 };
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -204,6 +205,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
   }, [q]);
   const magnumOn = !!nav.data?.extensions.some((e) => e.id === "magnum");
   const octaviaOn = !!nav.data?.extensions.some((e) => e.id === "octavia");
+  const designateOn = !!nav.data?.extensions.some((e) => e.id === "designate");
   const magnum = magnumOn ? { base: admin && session.is_admin ? "/admin/ext/magnum" : "/ext/magnum", project: admin && session.is_admin ? undefined : session.project?.id } : undefined;
   const found = useResourceSearch(debounced, admin && session.is_admin, services, magnum);
 
@@ -242,6 +244,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       ...create("new-container", tr("Create container"), "archive", "/object-store/containers?new=1", has("object-store"), "bucket swift s3"),
       ...create("new-lb", tr("Create load balancer"), "split", `${admin && session.is_admin ? "/admin" : ""}/ext/octavia/load-balancers?new=1`, octaviaOn, "lb octavia balancing vip"),
       ...create("new-k8s", tr("Create Kubernetes cluster"), "container", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/clusters?new=1`, magnumOn, "k8s kubernetes magnum container"),
+      ...create("new-dns-zone", tr("Create DNS zone"), "globe", `${admin && session.is_admin ? "/admin" : ""}/ext/designate/zones?new=1`, designateOn, "dns designate domain zone"),
       ...create("new-k8s-template", tr("Create cluster template"), "file-code", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/templates?new=1`, magnumOn, "k8s kubernetes magnum container"),
       ...create("terraform", tr("Export to Terraform"), "file-code", "/operations/terraform", true, "hcl iac opentofu"),
       ...(session.is_admin
@@ -266,7 +269,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       .filter((c) => c.id !== session.cloud.id)
       .map((c) => ({ id: `cloud:${c.id}`, group: tr("Switch cloud"), label: c.name, hint: c.user.name, icon: "cloud", keywords: "cloud switch", run: done(() => switchCloud.mutate(c.id)) }));
     return [...pages, ...actions, ...clouds, ...projects, ...regions];
-  }, [nav.data, session, admin, magnumOn, octaviaOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav.data, session, admin, magnumOn, octaviaOn, designateOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim();
   const results = useMemo(() => {

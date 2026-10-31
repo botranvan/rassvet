@@ -1,0 +1,18 @@
+[package]
+name = "rassvet-ext-designate"
+description = "rassvet extension: Designate DNS zones, record sets and reverse DNS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rassvet-ext-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+wiremock.workspace = true
