@@ -1,8 +1,11 @@
 import type { ExtensionUi } from "@rassvet/sdk";
+import { cleanup } from "./cleanup";
+import { palette } from "./palette";
 import Amphorae from "./Amphorae";
 import { ListenerDetail, LoadBalancerDetail, PoolDetail } from "./Detail";
 import LoadBalancers from "./LoadBalancers";
 import Settings from "./Settings";
+import { terraform } from "./terraform";
 
 const ui: ExtensionUi = {
   routes: [
@@ -13,6 +16,9 @@ const ui: ExtensionUi = {
     { path: "amphorae", component: Amphorae, adminOnly: true },
     { path: "settings", component: Settings, adminOnly: true },
   ],
+  palette,
+  terraform,
+  cleanup,
 };
 
 export default ui;

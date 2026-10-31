@@ -1,8 +1,8 @@
 /**
  * Command palette (Ctrl/⌘ K): jump to any page, run a quick action (launch, create, switch
  * cloud / project / region / view, theme, language, sign out) or find a resource by name or by a
- * pasted UUID (instances, volumes, networks, routers, security groups, images, and Kubernetes
- * clusters and cluster templates when the Magnum extension is enabled).
+ * pasted UUID: every kind in lib/palette.ts plus those the enabled extensions add
+ * (`ExtensionUi.palette`), which also bring their own "Create …" actions and search words.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -10,8 +10,8 @@ import { useNavigate as useRouterNavigate } from "react-router";
 import { useNavigate } from "@/components/Link";
 import { Icon } from "@/components/ui";
 import { LANGS, lang, setLang, tr } from "@/lib/i18n";
-import { api } from "@/lib/api";
-import { os } from "@/lib/os";
+import { extBase, useExtensionUis } from "@/extensions";
+import { CORE_RESOURCES, type Found, type PaletteContext, type ResourceKind, parseScope } from "@/lib/palette";
 import { type NavItem, type SessionInfo, useLogout, useNav, useSwitchCloud, useSwitchProject, useSwitchRegion } from "@/lib/session";
 import { toggleSidebar } from "@/lib/sidebar";
 import { useTheme } from "@/lib/theme";
@@ -47,112 +47,54 @@ function score(c: Cmd, q: string) {
   return 1;
 }
 
-type Found = { kind: string; id: string; name: string; path: string; icon: string };
+/** A kind of resource, with the context it is searched in (an extension's base path). */
+type Searched = { k: ResourceKind; c: Omit<PaletteContext, "signal"> };
 
-const KINDS: { kind: string; icon: string; svc: "compute" | "volume" | "network" | "image"; one: string; path: (id: string) => string; get: (id: string) => string }[] = [
-  { kind: tr("Instance"), icon: "server", svc: "compute", one: "server", path: (id) => `/compute/instances/${id}`, get: (id) => `servers/${id}` },
-  { kind: tr("Volume"), icon: "hard-drive", svc: "volume", one: "volume", path: (id) => `/storage/volumes/${id}`, get: (id) => `volumes/${id}` },
-  { kind: tr("Network"), icon: "network", svc: "network", one: "network", path: (id) => `/network/networks/${id}`, get: (id) => `networks/${id}` },
-  { kind: tr("Router"), icon: "router", svc: "network", one: "router", path: (id) => `/network/routers/${id}`, get: (id) => `routers/${id}` },
-  { kind: tr("Security group"), icon: "shield", svc: "network", one: "security_group", path: (id) => `/network/security-groups/${id}`, get: (id) => `security-groups/${id}` },
-  { kind: tr("Image"), icon: "disc-3", svc: "image", one: "", path: (id) => `/compute/images/${id}`, get: (id) => `images/${id}` },
-];
+const defId = (r: { id: string }) => r.id;
+const defName = (r: { name?: string | null }) => r.name;
 
-/** Kubernetes clusters and templates (Magnum extension; its gateway is `ext:magnum`). */
-interface MagnumSearch {
-  /** `/ext/magnum` or `/admin/ext/magnum`. */
-  base: string;
-  /** Project view: keep this project's clusters and the templates it can use (Magnum shows admins everything). */
-  project?: string;
-}
-
-type MgRow = { uuid: string; name?: string | null; project_id?: string | null; public?: boolean };
-
-/** Extra search words for the pages of an extension (by nav id prefix), e.g. "k8s" finds Kubernetes. */
-const EXT_KEYWORDS: Record<string, string> = {
-  magnum: "k8s kubernetes magnum container coe cluster",
-  octavia: "lb octavia load balancer balancing listener pool vip",
-  designate: "dns designate domain zone record recordset ptr reverse",
-};
-
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** Resources whose name contains `q` (or whose id is `q`). Each service is asked separately; failures are skipped. */
-function useResourceSearch(q: string, admin: boolean, services: string[], magnum?: MagnumSearch) {
+/**
+ * Resources whose name contains `q` (or whose ID is `q`), from every kind of the host and of
+ * the enabled extensions. Each kind is asked separately; failures (a 404, a service that
+ * refuses) are skipped. Kinds without a name filter in their API list once and are cached.
+ */
+function useResourceSearch(q: string, kinds: Searched[], key: unknown, enabled: boolean) {
   const qc = useQueryClient();
-  const has = (t: string[]) => t.some((x) => services.includes(x));
   return useQuery({
-    queryKey: ["palette", admin, q, magnum ?? null],
-    enabled: q.length >= 2,
+    queryKey: ["palette", q, key],
+    enabled,
     staleTime: 30_000,
     queryFn: async ({ signal }): Promise<Found[]> => {
-      const all = admin ? { all_tenants: 1 } : {};
-      const out: Found[] = [];
-      const add = (k: (typeof KINDS)[number], list: { id: string; name?: string | null }[]) => {
-        for (const r of list.slice(0, 8)) out.push({ kind: k.kind, id: r.id, name: r.name || r.id, path: k.path(r.id), icon: k.icon });
-      };
-      const usable = KINDS.filter((k) => has(k.svc === "volume" ? ["block-storage", "volumev3", "volume"] : [k.svc]));
-      const mine = (r: MgRow, template: boolean) => !magnum?.project || !r.project_id || r.project_id === magnum.project || (template && !!r.public);
-      const addMg = (template: boolean, list: MgRow[]) => {
-        for (const r of list.filter((x) => mine(x, template)).slice(0, 8))
-          out.push(
-            template
-              ? { kind: tr("Cluster template"), id: r.uuid, name: r.name || r.uuid, path: `${magnum!.base}/templates?edit=${r.uuid}`, icon: "file-code" }
-              : { kind: tr("Kubernetes cluster"), id: r.uuid, name: r.name || r.uuid, path: `${magnum!.base}/clusters/${r.uuid}`, icon: "container" },
-          );
+      // A search scoped to one kind (`vol:db`) shows more of it.
+      const perKind = kinds.length === 1 ? 30 : 8;
+      // One bucket per kind keeps the results in a stable order whatever answers first.
+      const out: Found[][] = kinds.map(() => []);
+      const add = (i: number, rows: unknown[]) => {
+        const { k, c } = kinds[i];
+        for (const r of rows.filter((x) => x && (!k.keep || k.keep(x, c))).slice(0, perKind)) {
+          const id = (k.id ?? defId)(r as never);
+          out[i].push({ kind: k.kind, icon: k.icon, id, name: (k.name ?? defName)(r as never) || id, path: k.path(r, c) });
+        }
       };
       if (UUID.test(q)) {
         const id = q.toLowerCase();
-        await Promise.allSettled([
-          ...usable.map((k) =>
-            (k.svc === "image"
-              ? api.get<Record<string, { id: string; name?: string }>>(`/image/images/${encodeURIComponent(id)}`, { signal })
-              : os.get<Record<string, { id: string; name?: string }>>(k.svc, k.get(id), undefined, { signal })
-            ).then((r) => {
-              const one = k.one ? r[k.one] : (r as unknown as { id: string; name?: string });
-              if (one?.id) add(k, [one]);
-            }),
-          ),
-          ...(magnum
-            ? [
-                os.get<MgRow>("ext:magnum", `clusters/${encodeURIComponent(id)}`, undefined, { signal }).then((r) => addMg(false, [r])),
-                os.get<MgRow>("ext:magnum", `clustertemplates/${encodeURIComponent(id)}`, undefined, { signal }).then((r) => addMg(true, [r])),
-              ]
-            : []),
-        ]);
-        return out;
+        await Promise.allSettled(kinds.map(({ k, c }, i) => k.get?.(id, { ...c, signal }).then((r) => r && add(i, [r]))));
+        return out.flat();
       }
       const needle = q.toLowerCase();
-      const byName = (l: { id: string; name?: string | null }[]) => l.filter((r) => (r.name ?? "").toLowerCase().includes(needle));
-      // Neutron and Glance can't search names: their (small) lists are cached for a minute.
-      const cached = <T,>(key: string, fn: () => Promise<T>) => qc.fetchQuery({ queryKey: ["palette-list", admin, key], queryFn: fn, staleTime: 60_000 });
-      const jobs = usable.map(async (k) => {
-        if (k.svc === "compute") {
-          const r = await os.get<{ servers: { id: string; name: string }[] }>("compute", "servers", { ...all, name: escapeRe(q), limit: 8 }, { signal });
-          add(k, r.servers);
-        } else if (k.svc === "volume") {
-          const r = await os.get<{ volumes: { id: string; name: string | null }[] }>("volume", "volumes", { ...all, "name~": q, limit: 8 }, { signal });
-          add(k, byName(r.volumes));
-        } else if (k.svc === "network") {
-          const [path, key] = k.one === "network" ? ["networks", "networks"] : k.one === "router" ? ["routers", "routers"] : ["security-groups", "security_groups"];
-          const list = await cached(path, () => os.list<{ id: string; name: string }>("network", path, key, { fields: ["id", "name"] }));
-          add(k, byName(list));
-        } else {
-          // Glance goes through Rassvet's image API (not the generic gateway).
-          const list = await cached("images", () => api.get<{ images: { id: string; name: string | null }[] }>("/image/images?view=all").then((r) => r.images));
-          add(k, byName(list));
-        }
-      });
-      if (magnum) {
-        // Magnum can't search names either.
-        const byMgName = (l: MgRow[]) => l.filter((r) => (r.name ?? "").toLowerCase().includes(needle));
-        jobs.push(
-          cached("magnum-clusters", () => os.list<MgRow>("ext:magnum", "clusters/detail", "clusters")).then((l) => addMg(false, byMgName(l))),
-          cached("magnum-templates", () => os.list<MgRow>("ext:magnum", "clustertemplates", "clustertemplates")).then((l) => addMg(true, byMgName(l))),
-        );
-      }
-      await Promise.allSettled(jobs);
-      return out;
+      const named = (i: number, rows: unknown[]) => rows.filter((r) => ((kinds[i].k.name ?? defName)(r as never) ?? "").toLowerCase().includes(needle));
+      await Promise.allSettled(
+        kinds.map(({ k, c }, i) => {
+          const listed = () =>
+            qc
+              .fetchQuery({ queryKey: ["palette-list", k.kind, c.base, c.admin, c.project], queryFn: () => k.list!(c), staleTime: 60_000 })
+              .then((rows) => add(i, named(i, rows)));
+          // A kind with both searches by name and lists when the API refuses that filter.
+          if (k.search) return k.search(q, { ...c, signal }).then((rows) => add(i, named(i, rows)), (e) => (k.list && !signal.aborted ? listed() : Promise.reject(e)));
+          return k.list ? listed() : undefined;
+        }),
+      );
+      return out.flat();
     },
   });
 }
@@ -203,11 +145,21 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
     const t = setTimeout(() => setDebounced(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  const magnumOn = !!nav.data?.extensions.some((e) => e.id === "magnum");
-  const octaviaOn = !!nav.data?.extensions.some((e) => e.id === "octavia");
-  const designateOn = !!nav.data?.extensions.some((e) => e.id === "designate");
-  const magnum = magnumOn ? { base: admin && session.is_admin ? "/admin/ext/magnum" : "/ext/magnum", project: admin && session.is_admin ? undefined : session.project?.id } : undefined;
-  const found = useResourceSearch(debounced, admin && session.is_admin, services, magnum);
+  const exts = useExtensionUis();
+  const view = admin && session.is_admin;
+  const kinds = useMemo<Searched[]>(() => {
+    const c = { admin: view, project: session.project?.id, base: "" };
+    const ok = (k: ResourceKind) => (!k.view || (k.view === "admin") === view) && (!k.services || k.services.some((s) => services.includes(s)));
+    return [
+      ...CORE_RESOURCES.filter(ok).map((k) => ({ k, c })),
+      ...(exts ?? []).flatMap((e) => (e.ui.palette?.resources ?? []).filter(ok).map((k) => ({ k, c: { ...c, base: extBase(e.id, view) } }))),
+    ];
+  }, [exts, view, session.project?.id, services]);
+  // `<kind>:<name>` (e.g. `vol:db`, `instances:web`) searches only that kind, by name or ID.
+  const scope = useMemo(() => parseScope(debounced, kinds.map((x) => x.k)), [debounced, kinds]);
+  const scoped = useMemo(() => (scope ? scope.kinds.map((i) => kinds[i]) : kinds), [scope, kinds]);
+  const term = scope ? scope.q : debounced;
+  const found = useResourceSearch(term, scoped, [view, session.project?.id, exts?.map((e) => e.id), scope?.kinds], scope ? true : term.length >= 2);
 
   const done = (f: () => void) => () => {
     onClose();
@@ -225,7 +177,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
         group: tr("Go to"),
         label: tr(i.label),
         hint: i.section === "admin" ? `${tr("Admin")} · ${tr(i.group)}` : tr(i.group),
-        keywords: `${i.label} ${i.group} ${i.section === "admin" ? "admin" : ""} ${EXT_KEYWORDS[i.id.split(".")[0]] ?? ""}`,
+        keywords: `${i.label} ${i.group} ${i.section === "admin" ? "admin" : ""} ${exts?.find((e) => e.id === i.id.split(".")[0])?.ui.palette?.keywords ?? ""}`,
         icon: i.icon,
         run: done(() => go(i.path)),
       })),
@@ -242,10 +194,9 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       ...create("new-fip", tr("Allocate floating IP"), "globe", "/network/floating-ips?new=1", has("network"), "public address"),
       ...create("new-keypair", tr("Create key pair"), "key-round", "/compute/keypairs?new=1", has("compute"), "ssh"),
       ...create("new-container", tr("Create container"), "archive", "/object-store/containers?new=1", has("object-store"), "bucket swift s3"),
-      ...create("new-lb", tr("Create load balancer"), "split", `${admin && session.is_admin ? "/admin" : ""}/ext/octavia/load-balancers?new=1`, octaviaOn, "lb octavia balancing vip"),
-      ...create("new-k8s", tr("Create Kubernetes cluster"), "container", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/clusters?new=1`, magnumOn, "k8s kubernetes magnum container"),
-      ...create("new-dns-zone", tr("Create DNS zone"), "globe", `${admin && session.is_admin ? "/admin" : ""}/ext/designate/zones?new=1`, designateOn, "dns designate domain zone"),
-      ...create("new-k8s-template", tr("Create cluster template"), "file-code", `${admin && session.is_admin ? "/admin" : ""}/ext/magnum/templates?new=1`, magnumOn, "k8s kubernetes magnum container"),
+      ...(exts ?? []).flatMap((e) =>
+        (e.ui.palette?.actions ?? []).flatMap((x) => create(`${e.id}:${x.id}`, x.label, x.icon, `${extBase(e.id, view)}/${x.path}`, true, x.keywords)),
+      ),
       ...create("terraform", tr("Export to Terraform"), "file-code", "/operations/terraform", true, "hcl iac opentofu"),
       ...(session.is_admin
         ? [{ id: "view", group: tr("Actions"), label: admin ? tr("Switch to project view") : tr("Switch to admin view"), icon: "arrow-right-left", keywords: "mode", run: done(() => go(admin ? "/" : "/admin")) }]
@@ -269,9 +220,12 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
       .filter((c) => c.id !== session.cloud.id)
       .map((c) => ({ id: `cloud:${c.id}`, group: tr("Switch cloud"), label: c.name, hint: c.user.name, icon: "cloud", keywords: "cloud switch", run: done(() => switchCloud.mutate(c.id)) }));
     return [...pages, ...actions, ...clouds, ...projects, ...regions];
-  }, [nav.data, session, admin, magnumOn, octaviaOn, designateOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav.data, session, admin, exts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = q.trim();
+  /** The kinds a typed `<kind>:` prefix names (before the debounce settles too), for the header. */
+  const typedScope = useMemo(() => parseScope(query, kinds.map((x) => x.k)), [query, kinds]);
+  const scopeLabel = typedScope ? [...new Set(typedScope.kinds.map((i) => kinds[i].k.kind))].join(", ") : "";
   const results = useMemo(() => {
     const ranked = commands
       .map((c, i) => ({ c, s: score(c, query), i }))
@@ -281,21 +235,30 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
     // Without a query: actions first, then pages; clouds/projects/regions only when searched.
     const shown = query ? ranked.slice(0, 40) : [...ranked.filter((c) => c.group === tr("Actions")).slice(0, 6), ...ranked.filter((c) => c.group === tr("Go to")).slice(0, 8)];
     const res: Cmd[] =
-      query.length >= 2 && debounced === query
-        ? (found.data ?? []).map((f) => ({ id: `res:${f.path}`, group: tr("Resources"), label: f.name, hint: f.kind, icon: f.icon, run: done(() => goRes(f.path)) }))
+      (typedScope || query.length >= 2) && debounced === query
+        ? (found.data ?? []).map((f) => ({
+            id: `res:${f.kind}:${f.id}`,
+            group: typedScope ? `${tr("Resources")} · ${scopeLabel}` : tr("Resources"),
+            label: f.name,
+            hint: f.kind,
+            icon: f.icon,
+            run: done(() => goRes(f.path)),
+          }))
         : [];
+    // A scoped search shows resources only.
+    if (typedScope) return res;
     // One block per group, groups in the order of their best match.
     const groups = new Map<string, Cmd[]>();
     for (const c of UUID.test(query) ? [...res, ...shown] : [...shown, ...res]) groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
     return [...groups.values()].flat();
-  }, [commands, query, debounced, found.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [commands, query, debounced, found.data, typedScope, scopeLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setActive(0), [query]);
   useEffect(() => {
     listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const searching = query.length >= 2 && (debounced !== query || found.isFetching);
+  const searching = (!!typedScope || query.length >= 2) && (debounced !== query || found.isFetching);
   let lastGroup = "";
   const rows: ReactNode[] = [];
   results.forEach((c, i) => {
@@ -345,7 +308,7 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
               results[active]?.run();
             }
           }}
-          placeholder={tr("Search pages, actions, or resources by name or ID…")}
+          placeholder={tr("Search pages, actions, or resources by name or ID")}
           aria-label={tr("Search")}
           role="combobox"
           aria-expanded
@@ -356,12 +319,14 @@ function Palette({ session, onClose }: { session: SessionInfo; onClose: () => vo
         <kbd className="shrink-0 rounded border border-line px-1.5 py-0.5 font-mono text-[11px] text-muted">Esc</kbd>
       </div>
       <div ref={listRef} id="palette-list" role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {rows.length ? rows : <p className="px-3 py-6 text-center text-sm text-muted">{searching ? tr("Searching…") : tr("Nothing matches “{q}”.", { q: query })}</p>}
+        {rows.length ? rows : <p className="px-3 py-6 text-center text-sm text-muted">{searching ? tr("Searching…") : typedScope ? tr("No {kind} matches “{q}”.", { kind: scopeLabel, q: typedScope.q }) : tr("Nothing matches “{q}”.", { q: query })}</p>}
       </div>
       <div className="flex gap-4 border-t border-line px-4 py-2 text-xs text-muted">
         <span>↑ ↓ {tr("to move")}</span>
         <span>↵ {tr("to open")}</span>
-        <span className="ml-auto">{tr("Names or a pasted UUID find resources")}</span>
+        <span className="ml-auto truncate">
+          {typedScope ? tr("Only {kind}", { kind: scopeLabel }) : tr("Names or a pasted UUID find resources; vol:name searches one kind")}
+        </span>
       </div>
     </div>
   );

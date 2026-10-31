@@ -12,7 +12,7 @@ import { Badge, Button, ErrorNotice, Field, Icon, Input, PageHeader, StatusDot, 
 import { type Backup, backupBusy, useBackups } from "@/lib/cinder";
 import { datedName, fmtDate } from "@/lib/format";
 import { useProjects } from "@/lib/identity";
-import { BACKUP_STATUSES, choice, filters, text, useProjectFilter, idFilter } from "@/lib/filters";
+import { BACKUP_STATUSES, choice, filters, useProjectFilter, idFilter, cinderName } from "@/lib/filters";
 import { type Volume, os, useInvalidate, useListOrPages, useSnapshots, useVolumes, volumeStatus } from "@/lib/os";
 import { useSession } from "@/lib/session";
 import { tr, trx } from "@/lib/i18n";
@@ -24,7 +24,7 @@ export default function Backups({ admin = false }: { admin?: boolean }) {
   const volumes = useVolumes(admin ? { all_tenants: 1 } : undefined);
   const backups = useListOrPages<Backup>(true, "volume", "backups/detail", "backups", admin ? { all_tenants: 1 } : undefined, {
     filters: filters(
-      text("name", tr("Name"), "name~", tr("Name contains…")),
+      cinderName(),
       idFilter("backups", "backup"),
       filterProject,
       choice("status", tr("Status"), "status", BACKUP_STATUSES),

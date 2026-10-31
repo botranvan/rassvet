@@ -8,6 +8,7 @@ import type { Status } from "@/components/ui";
 import { ApiError, api } from "./api";
 import { limiter } from "./limiter";
 import { usePref } from "./prefs";
+import { findFilter, useFindParam } from "./useTab";
 import { lang, tr } from "@/lib/i18n";
 
 /** Core services, or `ext:<id>` for an extension's own allowlisted gateway (`/api/ext/<id>/os/...`). */
@@ -141,7 +142,15 @@ export interface ServerFilter {
    * names): the whole list (other query + sort) is fetched once, filtered here and paged locally.
    */
   client?: (row: never, v: string) => boolean;
+  /**
+   * Like `client`, but only once the API refuses `param` (HTTP 400): e.g. Cinder's `name~`,
+   * which needs microversion 3.34 and a `name` entry in the cloud's resource filters.
+   */
+  fallback?: (row: never, v: string) => boolean;
 }
+
+/** Filters an API refused (`<svc> <path> <filter key>`): they're matched in the browser from then on. */
+const refused = new Set<string>();
 
 /** `"instance\tweb-.*"` → `["instance", "web-.*"]` (a picker choice and its text box). */
 export const splitChoice = (v: string): [string, string] => {
@@ -200,8 +209,9 @@ export function useOsPaged<T extends { id: string }>(
   // The last filter and sort of this table come back when the user returns to the page.
   const [saved, save] = usePref<{ filter?: { key: string; value: string }; sort?: { key: string; dir: 1 | -1 } | null }>(opts.tableId && `paged.${opts.tableId}`);
   const known = (k?: string) => !!k && !!opts.filters?.some((f) => f.key === k);
-  const [filter, setFilterState] = useState<{ key: string; value: string }>(() =>
-    known(saved?.filter?.key) ? saved!.filter! : { key: opts.filters?.[0]?.key ?? "", value: "" },
+  const find = useFindParam();
+  const [filter, setFilterState] = useState<{ key: string; value: string }>(
+    () => findFilter(find, opts.filters) ?? (known(saved?.filter?.key) ? saved!.filter! : { key: opts.filters?.[0]?.key ?? "", value: "" }),
   );
   const [sort, setSortState] = useState<{ key: string; dir: 1 | -1 } | null>(() => (saved?.sort && opts.sort?.[saved.sort.key] ? saved.sort : null));
   const page = markers.length - 1;
@@ -211,22 +221,25 @@ export function useOsPaged<T extends { id: string }>(
   const value = filter.value.trim();
   const qc = useQueryClient();
   const lookup = def?.byId && value ? def.byId(value) : null;
-  const match = def?.client && value ? def.client : null;
+  const refusedKey = `${svc} ${listPath} ${def?.key}`;
+  const match = !value ? null : (def?.client ?? (def?.fallback && refused.has(refusedKey) ? def.fallback : null));
   const resolve = def?.resolve && value && !lookup && !match ? def.resolve : null;
   const fq: Query = def && value && !lookup && !match && !resolve ? (typeof def.param === "string" ? { [def.param]: value } : def.param(value)) : {};
   const sq: Query = sort && opts.sort?.[sort.key] ? sortQuery(svc, opts.sort[sort.key], sort.dir) : {};
   const query = useQuery({
     queryKey: ["os", svc, listPath, "paged", q, pageSize, match ? page : markers[page], fq, sq, lookup?.path, (match || resolve) && value],
     queryFn: async () => {
-      if (match) {
+      /** The whole list, fetched once, matched and paged here. */
+      const inBrowser = async (m: (row: never, v: string) => boolean, at: number) => {
         const all = await qc.fetchQuery({
           queryKey: ["os", svc, listPath, "all", q, sq],
           queryFn: () => os.list<T>(svc, listPath, key, { ...q, ...sq }),
           staleTime: 30_000,
         });
-        const hits = all.filter((r) => match(r as never, value));
-        return { rows: hits.slice(page * pageSize, (page + 1) * pageSize), hasNext: hits.length > (page + 1) * pageSize };
-      }
+        const hits = all.filter((r) => m(r as never, value));
+        return { rows: hits.slice(at * pageSize, (at + 1) * pageSize), hasNext: hits.length > (at + 1) * pageSize };
+      };
+      if (match) return inBrowser(match, page);
       if (lookup) {
         // One item by ID; not found (or another project's, in a project view) = no rows.
         const one = await os
@@ -251,7 +264,15 @@ export function useOsPaged<T extends { id: string }>(
         if (!got) return { rows: [], hasNext: false };
         rq = got;
       }
-      const r = await os.get<Record<string, unknown>>(svc, listPath, { ...q, ...rq, ...sq, limit: pageSize + 1, marker: markers[page] });
+      let r: Record<string, unknown>;
+      try {
+        r = await os.get<Record<string, unknown>>(svc, listPath, { ...q, ...rq, ...sq, limit: pageSize + 1, marker: markers[page] });
+      } catch (e) {
+        // The API refused the filter: match in the browser, now and from then on.
+        if (!def?.fallback || !(e instanceof ApiError) || e.status !== 400) throw e;
+        refused.add(refusedKey);
+        return inBrowser(def.fallback, 0);
+      }
       const got = (r[key] ?? []) as T[];
       return { rows: got.slice(0, pageSize), hasNext: got.length > pageSize };
     },

@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { RemotePaging } from "@/components/DataTable";
 import { api } from "./api";
 import { type ServerFilter, os, useOsGet, useOsList } from "./os";
+import { findFilter, useFindParam } from "./useTab";
 import { tr } from "@/lib/i18n";
 
 type Query = Record<string, string | number | boolean | string[] | null | undefined>;
@@ -155,7 +156,8 @@ export function useOffsetPaged<T extends object>(
 ) {
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
-  const [filter, setFilter] = useState<{ key: string; value: string }>({ key: opts.filters?.[0]?.key ?? "", value: "" });
+  const find = useFindParam();
+  const [filter, setFilter] = useState<{ key: string; value: string }>(() => findFilter(find, opts.filters) ?? { key: opts.filters?.[0]?.key ?? "", value: "" });
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(opts.defaultSort ?? null);
   const def = opts.filters?.find((f) => f.key === filter.key);
   const value = filter.value.trim();

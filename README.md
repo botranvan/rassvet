@@ -142,3 +142,34 @@ cargo test && cargo clippy --all-targets
    and register it in `crates/server/src/extensions.rs`.
 
 An extension is shown only when all its service types have endpoints in the user's current region.
+
+### Plugging into host features
+
+Besides `routes`, an `ExtensionUi` can contribute to features the host owns. Each contribution lives in its
+own file of the extension, so the host has no extension-specific code (see `extensions/magnum/ui/` for all
+three):
+
+```
+extensions/<id>/ui/
+  index.tsx       routes + the contributions below
+  palette.ts      palette:   PaletteContribution    (command palette)
+  terraform.ts    terraform: TerraformContribution  (Operations › Export to Terraform)
+  cleanup.tsx     cleanup:   CleanupContribution    (Operations › Cleanup)
+```
+
+- **Command palette** — `keywords` (extra words that find the extension's pages), `actions` ("Create …"
+  entries; `path` is relative to `/ext/<id>`) and `resources`: one `ResourceKind` per kind of resource, with
+  `aliases` (for `<alias>:<name>` searches, e.g. `vol:db`), `get(id)` to find it by a pasted UUID, `search(q)` (the API filters names) or `list()` (cached, matched
+  here), and `path(row, ctx)` to open it (`ctx.base` is `/ext/<id>` or `/admin/ext/<id>`). The host's own
+  kinds are in `ui/src/lib/palette.ts`; a list page without a detail page can be opened on one row with
+  `findPath(list, id)` (`?find=<id>`).
+- **Export to Terraform** — `useSource({ projectId })` is a hook that loads the extension's resources and
+  returns a `TfSource`: `sections` (the pickable lists; kinds named `<id>.<kind>`), `dependencies` (what a
+  picked resource needs, core kinds included), `names` and `generate`, which write blocks with the `TfGen`
+  helpers (`block`, `attrs`, `str`, `network`, `subnet`, `image`, `keypair`, `variable`…) so references to
+  exported resources, lookups and import blocks work like the core ones.
+- **Cleanup** — `useFindings(ctx)` is a hook returning `Finder`s (a card and the table it opens). The context
+  carries the view (`admin`, `projectId`), the chosen age (`idle(...timestamps)`) and the helpers that make
+  the tables look like the host's (`table`, `projectCol`, `ageCol`).
+
+Contributions are optional; the host only calls those an available extension provides.

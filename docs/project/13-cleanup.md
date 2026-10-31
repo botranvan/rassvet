@@ -24,6 +24,9 @@ leftovers in your project and lets you remove them in bulk.
 | Networks without ports | nothing plugged in (external and shared networks are not listed) | Delete |
 | Failed Kubernetes clusters | Magnum clusters whose create, update or delete failed (when the cloud has Magnum) | Delete |
 | Unused cluster templates | your templates no cluster was created from (when the cloud has Magnum) | Delete |
+| Load balancers in error | create, update or failover failed (when the cloud has Octavia) | Delete (cascade) |
+| Load balancers without listeners | they accept no traffic but still run amphorae and hold a VIP (when the cloud has Octavia) | Delete (cascade) |
+| DNS zones in error | Designate couldn't create, update or publish them (when the cloud has Designate) | Delete |
 
 ## Steps
 

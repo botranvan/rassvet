@@ -208,6 +208,18 @@ export function matches(text: string | null | undefined, pattern: string) {
 }
 
 /**
+ * Cinder "name contains": the `name~` filter (microversion 3.34+ and allowed by the cloud's
+ * resource filters); where Cinder refuses it, the name is matched in the browser instead.
+ */
+export const cinderName = (): ServerFilter => ({
+  key: "name",
+  label: tr("Name"),
+  param: "name~",
+  placeholder: tr("Name contains…"),
+  fallback: (row: { name?: string | null }, v) => (row.name ?? "").toLowerCase().includes(v.toLowerCase()),
+});
+
+/**
  * Name as a regular expression, matched in the browser: for APIs whose `name` filter is an
  * exact match (Neutron). Only used while a name is typed; the list is fetched whole then.
  */

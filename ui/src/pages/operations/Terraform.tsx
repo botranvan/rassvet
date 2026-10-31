@@ -1,7 +1,8 @@
 /**
  * Export to Terraform: pick instances, volumes, networks, routers, security groups, floating
- * IPs, key pairs and (with the Magnum extension) Kubernetes clusters and templates of the project and get a main.tf for the OpenStack provider, with import
- * blocks that adopt the existing resources.
+ * IPs and key pairs of the project, plus what the enabled extensions export (their
+ * `ExtensionUi.terraform`), and get a main.tf for the OpenStack provider, with import blocks
+ * that adopt the existing resources.
  */
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
@@ -24,16 +25,13 @@ import {
   useKeypairs,
   useOsList,
 } from "@/lib/os";
-import { useNav, useSession } from "@/lib/session";
-import { type TfCluster, type TfClusterTemplate, type TfKind, type TfSelection, emptySelection, generate, withDependencies } from "@/lib/terraform";
+import { useSession } from "@/lib/session";
+import { CORE_KINDS, type TfItem, type TfSection, type TfSelection, type TfSource, emptySelection, generate, withDependencies } from "@/lib/terraform";
+import { type ExtensionModule, useExtensionUis } from "@/extensions";
 import { cn } from "@/lib/utils";
 import { tr } from "@/lib/i18n";
 
-interface Item {
-  id: string;
-  name: string;
-  sub?: string;
-}
+type Item = TfItem;
 
 function Section({
   kind,
@@ -47,7 +45,7 @@ function Section({
   onToggle,
   onSet,
 }: {
-  kind: TfKind;
+  kind: string;
   icon: string;
   title: string;
   items: Item[] | undefined;
@@ -56,8 +54,8 @@ function Section({
   sel: Set<string>;
   /** Added as a dependency of something selected. */
   auto: Set<string>;
-  onToggle: (kind: TfKind, id: string) => void;
-  onSet: (kind: TfKind, ids: string[], on: boolean) => void;
+  onToggle: (kind: string, id: string) => void;
+  onSet: (kind: string, ids: string[], on: boolean) => void;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(true);
@@ -113,16 +111,24 @@ function Section({
   );
 }
 
-const KINDS: TfKind[] = ["servers", "volumes", "networks", "routers", "secgroups", "fips", "keypairs", "clustertemplates", "clusters"];
-
 export default function Terraform() {
+  const exts = useExtensionUis();
+  if (!exts) return <p className="text-sm text-muted">{tr("Loading…")}</p>;
+  // Keyed by the extensions: their hooks run in a fixed order for the life of the page.
+  return <Export key={exts.map((e) => e.id).join()} exts={exts.filter((e) => e.ui.terraform)} />;
+}
+
+function Export({ exts }: { exts: ExtensionModule[] }) {
   const session = useSession().data;
   const pid = session?.project?.id ?? "";
   const cli = useCliInfo();
   const [params] = useSearchParams();
+  // Extension sources (a hook each; `exts` doesn't change while mounted).
+  const sources: TfSource[] = exts.map((e) => e.ui.terraform!.useSource({ projectId: pid }));
+  const extSections = sources.flatMap((x) => x.sections);
   const [sel, setSel] = useState<TfSelection>(() => {
     const s = emptySelection();
-    for (const k of KINDS) for (const id of (params.get(k) ?? "").split(",").filter(Boolean)) s[k].add(id);
+    for (const k of [...CORE_KINDS, ...extSections.map((x) => x.kind)]) for (const id of (params.get(k) ?? "").split(",").filter(Boolean)) (s[k] ??= new Set()).add(id);
     return s;
   });
   const [deps, setDeps] = useState(true);
@@ -142,11 +148,6 @@ export default function Terraform() {
   const sgs = useOsList<SecurityGroup>("network", "security-groups", "security_groups", mine, { enabled: on });
   const fips = useOsList<FloatingIp>("network", "floatingips", "floatingips", mine, { enabled: on });
   const keypairs = useKeypairs();
-  // Magnum lists every project's clusters and templates to admins: keep this project's.
-  const nav = useNav(true);
-  const magnum = on && !!nav.data?.extensions.some((e) => e.id === "magnum");
-  const mgTemplates = useOsList<TfClusterTemplate>("ext:magnum", "clustertemplates", "clustertemplates", undefined, { enabled: magnum });
-  const mgClusters = useOsList<TfCluster>("ext:magnum", "clusters/detail", "clusters", undefined, { enabled: magnum });
   // Image names, so instances and volumes can find their image by name.
   const images = useImages("all", {}, on && lookups);
   const full = <T,>(q: { data?: T[]; partial?: boolean }) => (q.partial ? undefined : q.data);
@@ -163,12 +164,12 @@ export default function Terraform() {
       fips: full(fips) ?? [],
       keypairs: (keypairs.data ?? []) as Keypair[],
       images: images.data?.images,
-      clustertemplates: mgTemplates.data,
-      clusters: mgClusters.data?.filter((c) => c.project_id === pid),
     }),
-    [servers, volumes, networks, subnets, routers, ports, sgs, fips, keypairs.data, images.data, mgTemplates.data, mgClusters.data, pid], // eslint-disable-line react-hooks/exhaustive-deps
+    [servers, volumes, networks, subnets, routers, ports, sgs, fips, keypairs.data, images.data], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  const effective = useMemo(() => (deps ? withDependencies(input, sel, pid) : sel), [deps, input, sel, pid]);
+  // The sources are new objects every render: their sections (data) say when they changed.
+  const extKey = JSON.stringify(extSections.map((x) => [x.kind, x.items?.length, x.loading]));
+  const effective = useMemo(() => (deps ? withDependencies(input, sel, pid, sources) : sel), [deps, input, sel, pid, extKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const result = useMemo(
     () =>
       generate(input, effective, {
@@ -178,18 +179,18 @@ export default function Terraform() {
         region: session?.region,
         cloud: cli.data?.cloud_id,
         date: localDate(),
-      }),
-    [input, effective, imports, lookups, session?.project?.name, session?.region, cli.data?.cloud_id],
+      }, sources),
+    [input, effective, imports, lookups, session?.project?.name, session?.region, cli.data?.cloud_id, extKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const toggle = (kind: TfKind, id: string) =>
+  const toggle = (kind: string, id: string) =>
     setSel((s) => {
       const next = { ...s, [kind]: new Set(s[kind]) };
       if (next[kind].has(id)) next[kind].delete(id);
       else next[kind].add(id);
       return next;
     });
-  const setMany = (kind: TfKind, ids: string[], v: boolean) =>
+  const setMany = (kind: string, ids: string[], v: boolean) =>
     setSel((s) => {
       const next = { ...s, [kind]: new Set(s[kind]) };
       for (const id of ids) {
@@ -200,7 +201,7 @@ export default function Terraform() {
     });
 
   const netName = (id: string) => input.networks.find((n) => n.id === id)?.name ?? id.slice(0, 8);
-  const items: Record<TfKind, Item[] | undefined> = {
+  const items: Record<string, Item[] | undefined> = {
     servers: full(servers)?.map((s) => ({ id: s.id, name: s.name, sub: [s.status, s.flavor.original_name, serverIps(s).filter((x) => !x.floating).map((x) => x.addr)[0]].filter(Boolean).join(" · ") })),
     volumes: full(volumes)?.map((v) => ({ id: v.id, name: v.name || v.id.slice(0, 13), sub: [fmtBytes(v.size * 1024 ** 3), v.status, v.volume_type].filter(Boolean).join(" · ") })),
     networks: full(networks)
@@ -210,27 +211,26 @@ export default function Terraform() {
     secgroups: full(sgs)?.map((g) => ({ id: g.id, name: g.name, sub: tr("{n} rules", { n: g.security_group_rules?.length ?? 0 }) })),
     fips: full(fips)?.map((f) => ({ id: f.id, name: f.floating_ip_address, sub: f.fixed_ip_address ? `→ ${f.fixed_ip_address}` : tr("not associated") })),
     keypairs: keypairs.data?.map((k) => ({ id: k.name, name: k.name, sub: k.fingerprint })),
-    clustertemplates: mgTemplates.data
-      ?.filter((t) => t.project_id === pid)
-      .map((t) => ({ id: t.uuid, name: t.name, sub: [t.coe, t.driver ?? "", t.network_driver].filter(Boolean).join(" · ") })),
-    clusters: input.clusters?.map((c) => ({ id: c.uuid, name: c.name, sub: tr("{m} master(s), {n} worker(s)", { m: c.master_count, n: c.node_count }) })),
   };
-  const sections: { kind: TfKind; icon: string; title: string; q: { isPending: boolean; error: unknown; partial?: boolean } }[] = [
-    { kind: "servers", icon: "server", title: tr("Instances"), q: servers },
-    { kind: "volumes", icon: "hard-drive", title: tr("Volumes"), q: volumes },
-    { kind: "networks", icon: "network", title: tr("Networks (with subnets)"), q: { isPending: networks.isPending || subnets.isPending || !!networks.partial, error: networks.error ?? subnets.error } },
-    { kind: "routers", icon: "router", title: tr("Routers (with interfaces)"), q: { isPending: routers.isPending || ports.isPending || !!ports.partial, error: routers.error ?? ports.error } },
-    { kind: "secgroups", icon: "shield", title: tr("Security groups (with rules)"), q: sgs },
-    { kind: "fips", icon: "globe", title: tr("Floating IPs"), q: fips },
-    { kind: "keypairs", icon: "key-round", title: tr("Key pairs"), q: keypairs },
-    ...(magnum
-      ? [
-          { kind: "clustertemplates" as const, icon: "file-code", title: tr("Kubernetes cluster templates"), q: mgTemplates },
-          { kind: "clusters" as const, icon: "container", title: tr("Kubernetes clusters"), q: mgClusters },
-        ]
-      : []),
+  const core = (kind: string, icon: string, title: string, q: { isPending: boolean; error: unknown; partial?: boolean }): TfSection => ({
+    kind,
+    icon,
+    title,
+    items: items[kind],
+    loading: q.isPending || !!q.partial,
+    error: q.error,
+  });
+  const sections: TfSection[] = [
+    core("servers", "server", tr("Instances"), servers),
+    core("volumes", "hard-drive", tr("Volumes"), volumes),
+    core("networks", "network", tr("Networks (with subnets)"), { isPending: networks.isPending || subnets.isPending || !!networks.partial, error: networks.error ?? subnets.error }),
+    core("routers", "router", tr("Routers (with interfaces)"), { isPending: routers.isPending || ports.isPending || !!ports.partial, error: routers.error ?? ports.error }),
+    core("secgroups", "shield", tr("Security groups (with rules)"), sgs),
+    core("fips", "globe", tr("Floating IPs"), fips),
+    core("keypairs", "key-round", tr("Key pairs"), keypairs),
+    ...extSections,
   ];
-  const picked = KINDS.reduce((a, k) => a + sel[k].size, 0);
+  const picked = Object.values(sel).reduce((a, k) => a + k.size, 0);
   const projectSlug = (session?.project?.name ?? "project").replace(/[^\w.-]+/g, "-");
 
   return (
@@ -247,11 +247,11 @@ export default function Terraform() {
               kind={s.kind}
               icon={s.icon}
               title={s.title}
-              items={items[s.kind]}
-              loading={s.q.isPending || !!s.q.partial}
-              error={s.q.error}
-              sel={sel[s.kind]}
-              auto={effective[s.kind]}
+              items={s.items}
+              loading={s.loading}
+              error={s.error}
+              sel={sel[s.kind] ?? new Set()}
+              auto={effective[s.kind] ?? new Set()}
               onToggle={toggle}
               onSet={setMany}
             />
