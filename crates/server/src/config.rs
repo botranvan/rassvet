@@ -122,6 +122,10 @@ pub struct CloudConfig {
     pub insecure_tls: bool,
     #[serde(default)]
     pub ca_file: Option<String>,
+    /// Settings of compiled-in extensions for this cloud: `[cloud.extensions.<id>]` tables,
+    /// read by each extension (e.g. `[cloud.extensions.monitors]` for its Prometheus).
+    #[serde(default)]
+    pub extensions: std::collections::BTreeMap<String, toml::Value>,
 }
 
 fn default_domain() -> String {
@@ -193,6 +197,24 @@ mod tests {
         assert!(cfg.memcached.is_none());
         assert_eq!(cfg.log.max_files, 14);
         assert!(cfg.log.file.is_none());
+    }
+
+    #[test]
+    fn parses_extension_settings() {
+        let cfg: Config = toml::from_str(
+            r#"
+[[cloud]]
+id = "lab"
+name = "Lab"
+auth_url = "http://keystone/v3"
+
+[cloud.extensions.monitors]
+prometheus_url = "http://prom:9090"
+"#,
+        )
+        .unwrap();
+        let m = &cfg.clouds[0].extensions["monitors"];
+        assert_eq!(m["prometheus_url"].as_str(), Some("http://prom:9090"));
     }
 
     #[test]

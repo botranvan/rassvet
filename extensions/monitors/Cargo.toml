@@ -1,0 +1,20 @@
+[package]
+name = "rassvet-ext-monitors"
+description = "rassvet extension: monitors of instances (libvirt) and physical servers from Prometheus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rassvet-ext-api.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+tokio.workspace = true
+wiremock.workspace = true

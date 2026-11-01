@@ -49,3 +49,20 @@ interface = "public"          # public | internal | admin
 # default_region = "RegionOne"
 # ca_file = "/etc/ssl/certs/openstack-ca.pem"
 insecure_tls = false
+
+# Optional: Monitors extension. Charts of instances (libvirt) and physical servers, read from
+# a Prometheus-compatible API that Telegraf writes to. Without this table the extension is
+# hidden in this cloud. Project users only see series whose project_id is their project;
+# admins see every project and the physical servers.
+# [cloud.extensions.monitors]
+# prometheus_url = "http://prometheus.example.com:9090"
+# # bearer_token_file = "/etc/rassvet/prometheus.token"   # or bearer_token = "…"
+# # username = "rassvet"                                   # HTTP basic auth instead
+# # password_file = "/etc/rassvet/prometheus.password"     # or password = "…"
+# # ca_file = "/etc/ssl/certs/prometheus-ca.pem"
+# # insecure_tls = false
+# project_max_range_days = 60     # how far back a project user may look
+# admin_max_range_days = 365      # how far back an admin may look
+# # timeout_seconds = 30
+# # rate_window_seconds = 300     # smallest rate() window: ≥ 4 × the Telegraf interval
+# # region_filter = false         # also match region="<session region>" (one Prometheus, several regions)
