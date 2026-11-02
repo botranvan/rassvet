@@ -102,11 +102,17 @@ function PanelCard({ dashboard, panel, target, range }: { dashboard: string; pan
                   />
                 );
               case "pie_chart":
-                return <Pie key={i} series={b.series} unit={b.unit} />;
+                return <Pie key={i} series={b.series} unit={b.unit} legendRows={panel.legend_rows} />;
               default:
                 return (
                   <div key={i}>
-                    <Chart series={b.series} unit={b.unit} range={{ start: q.data!.start, end: q.data!.end }} step={q.data!.step} />
+                    <Chart
+                      series={b.series}
+                      unit={b.unit}
+                      range={{ start: q.data!.start, end: q.data!.end }}
+                      step={q.data!.step}
+                      legendRows={panel.legend_rows}
+                    />
                     {q.data!.hidden > 0 && (
                       <p className="mt-2 text-xs text-muted">{tr("{n} quieter series not shown", { n: q.data!.hidden })}</p>
                     )}

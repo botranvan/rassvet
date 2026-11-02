@@ -40,6 +40,8 @@ export interface Panel {
   /** `target`: needs a picked instance / server; `overview`: the project / fleet. */
   scope: "target" | "overview";
   queries: { type: ChartType; unit: Unit }[];
+  /** Legend rows shown before the legend scrolls. */
+  legend_rows: number;
 }
 
 export interface Dashboard {

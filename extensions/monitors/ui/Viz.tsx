@@ -1,8 +1,8 @@
 /** Single-value panels: stat tiles, gauges and a pie (donut) chart, from the last value of each series. */
 import { useState } from "react";
-import { tr } from "@rassvet/sdk";
+import { cn, tr } from "@rassvet/sdk";
 import type { Series, Unit } from "./api";
-import { seriesColor, useChartStyle } from "./Chart";
+import { seriesColor, useChartStyle, useLegendPick } from "./Chart";
 import { fmt } from "./units";
 
 const last = (s: Series) => s.values.at(-1)?.[1] ?? null;
@@ -72,14 +72,20 @@ export function Gauges({ series, unit, min, max }: { series: Series[]; unit: Uni
 
 const MAX_SLICES = 8;
 
-/** A donut of the series' last values: the 7 largest and "Other". */
-export function Pie({ series, unit }: { series: Series[]; unit: Unit }) {
+/**
+ * A donut of the series' last values: the 7 largest and "Other". The legend lists every series
+ * (`legendRows` rows before it scrolls); ticking some draws only those.
+ */
+export function Pie({ series, unit, legendRows = 4 }: { series: Series[]; unit: Unit; legendRows?: number }) {
   useChartStyle();
   const [hover, setHover] = useState<number | null>(null);
-  let items = series
+  const pick = useLegendPick();
+  const all = series
     .map((s) => ({ name: s.name, value: Math.max(0, last(s) ?? 0) }))
     .filter((x) => x.value > 0)
     .sort((a, b) => b.value - a.value);
+  const shown = pick.isShown(all.map((x) => x.name));
+  let items = all.filter((x) => shown(x.name));
   if (items.length > MAX_SLICES) {
     const rest = items.slice(MAX_SLICES - 1).reduce((t, x) => t + x.value, 0);
     items = [...items.slice(0, MAX_SLICES - 1), { name: tr("Other"), value: rest }];
@@ -103,7 +109,7 @@ export function Pie({ series, unit }: { series: Series[]; unit: Unit }) {
         : `M${p(a0, R)} A${R},${R} 0 ${large} 1 ${p(a1, R)} L${p(a1, r)} A${r},${r} 0 ${large} 0 ${p(a0, r)} Z`;
     return { ...x, d, i };
   });
-  const shown = hover === null ? null : items[hover];
+  const focused = hover === null ? null : items[hover];
 
   return (
     <div className="mon-chart flex flex-wrap items-center gap-4">
@@ -123,31 +129,56 @@ export function Pie({ series, unit }: { series: Series[]; unit: Unit }) {
           </path>
         ))}
         <text x={80} y={78} textAnchor="middle" className="fill-ink text-[13px] font-semibold">
-          {fmt(shown ? shown.value : total, unit)}
+          {fmt(focused ? focused.value : total, unit)}
         </text>
         <text x={80} y={94} textAnchor="middle" className="fill-muted text-[10px]">
-          {shown ? `${((shown.value / total) * 100).toFixed(1)}%` : tr("Total")}
+          {focused ? `${((focused.value / total) * 100).toFixed(1)}%` : tr("Total")}
         </text>
       </svg>
-      <table className="min-w-0 flex-1 table-fixed text-xs">
-        <tbody>
-          {items.map((x, i) => (
-            <tr
-              key={x.name}
-              className="border-t border-line first:border-0"
-              onPointerEnter={() => setHover(i)}
-              onPointerLeave={() => setHover(null)}
-            >
-              <td className="truncate py-1" title={x.name}>
-                <span className="mr-2 inline-block size-2.5 rounded-sm align-middle" style={{ background: color(i) }} />
-                {x.name}
-              </td>
-              <td className="w-24 py-1 text-right font-mono">{fmt(x.value, unit)}</td>
-              <td className="w-14 py-1 text-right font-mono text-muted">{((x.value / total) * 100).toFixed(1)}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="min-w-0 flex-1 overflow-y-auto" style={{ maxHeight: 28 * (legendRows + (pick.picked.size ? 1 : 0)) }}>
+        {all.some((x) => pick.picked.has(x.name)) && (
+          <button type="button" className="h-7 text-xs text-cable hover:underline" onClick={pick.clear}>
+            {tr("Show all")}
+          </button>
+        )}
+        <table className="w-full table-fixed text-xs">
+          <tbody>
+            {all.map((x) => {
+              const k = items.findIndex((it) => it.name === x.name);
+              const on = shown(x.name);
+              return (
+                <tr
+                  key={x.name}
+                  className={cn("h-7 border-t border-line first:border-0", !on && "opacity-50")}
+                  onPointerEnter={() => k >= 0 && setHover(k)}
+                  onPointerLeave={() => setHover(null)}
+                >
+                  <td className="truncate" title={x.name}>
+                    <label className="flex min-w-0 cursor-pointer items-center gap-2">
+                      {all.length > 1 && (
+                        <input
+                          type="checkbox"
+                          className="size-3.5 shrink-0 accent-[var(--color-cable)]"
+                          checked={pick.picked.has(x.name)}
+                          onChange={() => pick.toggle(x.name)}
+                          aria-label={tr("Show only the ticked series")}
+                        />
+                      )}
+                      <span
+                        className="inline-block size-2.5 shrink-0 rounded-sm"
+                        style={{ background: k >= 0 ? color(k) : "var(--color-line)" }}
+                      />
+                      <span className="truncate">{x.name}</span>
+                    </label>
+                  </td>
+                  <td className="w-24 text-right font-mono">{fmt(x.value, unit)}</td>
+                  <td className="w-14 text-right font-mono text-muted">{on && total ? `${((x.value / total) * 100).toFixed(1)}%` : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

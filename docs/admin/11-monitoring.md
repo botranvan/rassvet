@@ -100,6 +100,7 @@ merged into one page, so you can keep the defaults in one file and add panels in
 | `title` | Name shown in the dashboard picker. Defaults to the key |
 | `kind` | `instance` (Instance monitors, every user) or `physical` (Physical server monitors, admins only). Defaults to `physical` when the key starts with `physical`, otherwise `instance` |
 | `variables` | The dashboard's own variables, used as `$name` in its queries: constants, or query variables picked in a dropdown (`label_values(...)`, see below) |
+| `legend_rows` | Default `legend_rows` of the dashboard's panels (4 when not set) |
 | `discover` | Series selector that lists what can be picked (see below) |
 | `panels` | The panels, in display order |
 
@@ -115,6 +116,8 @@ When a page has several dashboards of the same kind, a **Dashboard** picker appe
 | `type` | Default chart type of the panel's queries |
 | `width` | `half` (default) or `full` |
 | `min` / `max` | Range of gauges (default 0 to 100 for percentages, otherwise 0 to the largest value) |
+| `legend_rows` | Legend rows shown before the legend scrolls (1-50). Default: the dashboard's `legend_rows`, otherwise 4 |
+| `max_series` | Most series in the panel's time series chart, the busiest ones (1-50, default 8). Lines past the 8th are dashed, then dotted |
 | `queries` | One or more queries |
 
 ### Query keys
@@ -126,8 +129,11 @@ When a page has several dashboards of the same kind, a **Dashboard** picker appe
 | `legend` | `auto` (default): the labels that differ between the series, or the panel title when there's one series. Or a template such as `write-{{device}}`: `{{label}}` is replaced by the series' label |
 | `unit` | Unit of a `stat`, `gauge` or `pie_chart` query, when it differs from the panel's. A time series chart always uses the panel's unit |
 
-A time series chart shows at most eight series, the busiest ones, and says how many were left out. Use
-`topk()` in the query to choose which ones yourself.
+A time series chart shows at most `max_series` series (8 by default), the busiest ones, and says how many
+were left out. Use `topk()` in the query to choose which ones yourself.
+
+Legends of time series and pie charts show `legend_rows` rows (4 by default) and scroll for the rest. Users
+can tick series in a legend to draw only those; **Show all** shows every series again.
 
 ### Variables
 

@@ -24,7 +24,9 @@ Some dashboards have more dropdowns next to **Instance**, set up by your adminis
 flavor or a disk). Their choices apply to every panel of the page and are kept in the page's address.
 
 Point at a chart to see every series' value at that time. Under each chart, a table gives the **last**,
-**average** and **maximum** value of each series in the range. Panels can also show single values (as
+**average** and **maximum** value of each series in the range. Long legends show a few rows and scroll.
+Tick one or more series in a legend to draw only those (the scale adjusts to them), and click **Show all**
+to see every series again. Panels can also show single values (as
 numbers or gauges) and pie charts; those show the value at the end of the time range.
 
 | Chart | What it shows |
@@ -47,7 +49,7 @@ number of running instances, their vCPUs and memory, the busiest instances and m
 ## What you can see
 
 You only see your current project's instances. To look at another project, switch to it with the project
-picker in the top bar. Charts that would show more than eight series (for example, an instance with many
-disks) show the eight busiest and say how many were left out.
+picker in the top bar. Charts that would show more series than the dashboard allows (eight by default, for
+example for an instance with many disks) show the busiest ones and say how many were left out.
 
 The page's address holds the instance and time range, so you can send it to a colleague.

@@ -14,6 +14,8 @@
 //!     - name: cpu
 //!       description: CPU usage
 //!       unit: percent
+//!       legend_rows: 4          # legend rows before it scrolls (default: dashboard's, else 4)
+//!       max_series: 8           # most series in the time series chart (default 8, up to 50)
 //!       queries:
 //!         - query: 'sum(rate(libvirt_cpu_user{db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
 //!           type: time_series   # time_series | pie_chart | stat | gauge
@@ -110,6 +112,8 @@ struct EntryDef {
     kind: Option<Kind>,
     discover: Option<String>,
     variables: Option<VarsDef>,
+    /// Default `legend_rows` of the dashboard's panels.
+    legend_rows: Option<u32>,
     #[serde(default)]
     panels: Vec<PanelDef>,
 }
@@ -146,6 +150,10 @@ struct PanelDef {
     width: Width,
     min: Option<f64>,
     max: Option<f64>,
+    /// Legend rows shown before the legend scrolls (default: the dashboard's, else 4).
+    legend_rows: Option<u32>,
+    /// Most series in the panel's time series chart (default 8).
+    max_series: Option<u32>,
     queries: Vec<QueryDef>,
 }
 
@@ -177,6 +185,9 @@ pub struct Dashboard {
     #[serde(skip)]
     pub discover: String,
     pub panels: Vec<Panel>,
+    /// Default `legend_rows` of the panels (`legend_rows:` of the dashboard).
+    #[serde(skip)]
+    legend_rows: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,6 +278,14 @@ pub struct Panel {
     pub max: Option<f64>,
     pub scope: Scope,
     pub queries: Vec<Query>,
+    /// Legend rows shown before the legend scrolls.
+    pub legend_rows: u32,
+    /// `legend_rows` as set on the panel, if it was.
+    #[serde(skip)]
+    own_legend_rows: Option<u32>,
+    /// Most series in the panel's time series chart (the busiest ones are kept).
+    #[serde(skip)]
+    pub max_series: usize,
     /// Variables used by the panel's queries.
     #[serde(skip)]
     pub vars: BTreeSet<String>,
@@ -293,6 +312,12 @@ impl Catalog {
         self.dashboards.iter().find(|d| d.id == id)
     }
 }
+
+/// Legend rows shown before a legend scrolls, unless set.
+pub const DEFAULT_LEGEND_ROWS: u32 = 4;
+/// Series in a time series chart, unless set (`max_series`), and the most that can be set.
+pub const DEFAULT_MAX_SERIES: u32 = 8;
+const LIMIT_MAX_SERIES: u32 = 50;
 
 /// Variables filled by Rassvet; a dashboard's own `variables` may not use these names.
 pub const VARS: &[&str] = &[
@@ -416,6 +441,11 @@ pub fn parse(sources: &[(String, String)]) -> anyhow::Result<Catalog> {
     }
     for d in &mut cat.dashboards {
         check_vars(d)?;
+        // A dashboard's legend_rows may be set in a later entry than its panels.
+        let default = d.legend_rows.unwrap_or(DEFAULT_LEGEND_ROWS);
+        for p in &mut d.panels {
+            p.legend_rows = p.own_legend_rows.unwrap_or(default);
+        }
     }
     cat.dashboards.retain(|d| !d.panels.is_empty());
     Ok(cat)
@@ -551,6 +581,9 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
             if let Some(q) = e.discover {
                 d.discover = q;
             }
+            if e.legend_rows.is_some() {
+                d.legend_rows = e.legend_rows;
+            }
             i
         }
         None => {
@@ -560,6 +593,7 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
                 kind,
                 variables: Vec::new(),
                 server_picker: true,
+                legend_rows: e.legend_rows,
                 discover: e
                     .discover
                     .unwrap_or_else(|| default_discover(kind).to_owned()),
@@ -569,6 +603,9 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
         }
     };
     let d = &mut cat.dashboards[idx];
+    if d.legend_rows.is_some_and(|n| !(1..=50).contains(&n)) {
+        bail!("{at}: legend_rows must be 1-50");
+    }
     for (name, value) in e.variables.map(VarsDef::pairs).unwrap_or_default() {
         let Some(name) = name.as_str().map(str::to_owned) else {
             bail!("{at}: variable names must be text");
@@ -614,6 +651,14 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
         }
         if p.queries.is_empty() {
             bail!("{pat}: needs at least one query");
+        }
+        if p.legend_rows.is_some_and(|n| !(1..=50).contains(&n)) {
+            bail!("{pat}: legend_rows must be 1-50");
+        }
+        if p.max_series
+            .is_some_and(|n| !(1..=LIMIT_MAX_SERIES).contains(&n))
+        {
+            bail!("{pat}: max_series must be 1-{LIMIT_MAX_SERIES}");
         }
         let mut vars = BTreeSet::new();
         let mut queries = Vec::new();
@@ -670,6 +715,9 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
                 Scope::Overview
             },
             queries,
+            legend_rows: DEFAULT_LEGEND_ROWS,
+            own_legend_rows: p.legend_rows,
+            max_series: p.max_series.unwrap_or(DEFAULT_MAX_SERIES) as usize,
             vars,
         });
     }
@@ -1064,6 +1112,40 @@ mod tests {
         let own_host = "- dashboard: cloud.*\n  variables: [{hostname: a}]\n  panels: [{name: a, queries: [{query: 'y{project_id=\"$project_id\"}'}]}]\n";
         assert!(one(own_host).is_err());
         assert!(one("- dashboard: x\n  variables: [{a: 'label_values(x, \"bad\")'}]\n").is_err());
+    }
+
+    #[test]
+    fn legend_rows_and_max_series() {
+        let c = parse(&[
+            (
+                "a.yaml".into(),
+                r#"
+- dashboard: physical.*
+  panels:
+    - {name: a, queries: [{query: 'x'}]}
+    - {name: b, legend_rows: 2, max_series: 20, queries: [{query: 'x'}]}
+"#
+                .into(),
+            ),
+            (
+                "b.yaml".into(),
+                "- dashboard: physical.*\n  legend_rows: 6\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = &c.dashboards[0].panels;
+        assert_eq!((p[0].legend_rows, p[0].max_series), (6, 8));
+        assert_eq!((p[1].legend_rows, p[1].max_series), (2, 20));
+        assert_eq!(
+            one("- dashboard: physical-x\n  panels: [{name: a, queries: [{query: x}]}]")
+                .unwrap()
+                .dashboards[0]
+                .panels[0]
+                .legend_rows,
+            4
+        );
+        assert!(one("- dashboard: physical-x\n  panels: [{name: a, max_series: 51, queries: [{query: x}]}]").unwrap_err().to_string().contains("max_series"));
+        assert!(one("- dashboard: physical-x\n  legend_rows: 0\n  panels: [{name: a, queries: [{query: x}]}]").unwrap_err().to_string().contains("legend_rows"));
     }
 
     #[test]

@@ -4790,6 +4790,8 @@ const vi: Record<string, string> = {
   "Last 3 hours": "3 giờ qua",
   "Last 2 days": "2 ngày qua",
   "No values in this time range": "Không có giá trị nào trong khoảng thời gian này",
+  "Show all": "Hiện tất cả",
+  "Show only the ticked series": "Chỉ hiện các chuỗi được chọn",
 };
 
 export default vi;

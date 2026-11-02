@@ -3,7 +3,7 @@
  * missing, a crosshair with every series' value on hover, and a legend table (last / avg / max)
  * so values are readable as text and series aren't told apart by colour alone.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn, lang, tr } from "@rassvet/sdk";
 import type { Range, Series, Unit } from "./api";
 import { fmt, fmtTick, niceTicks } from "./units";
@@ -89,11 +89,46 @@ function stats(values: [number, number][]) {
   return { last: values[values.length - 1][1], avg: sum / values.length, max };
 }
 
-export function Chart({ series, unit, range, step }: { series: Series[]; unit: Unit; range: Range; step: number }) {
+/** Lines past the 8 colours are dashed, then dotted, so colour isn't the only difference. */
+export const seriesDash = (i: number) => (i < 8 ? undefined : i < 16 ? "6 3" : "2 3");
+
+/** Keep the series picked in the legend (by name); none picked, or none of them left, keeps all. */
+export function useLegendPick() {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggle = (name: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(name)) n.delete(name);
+      else n.add(name);
+      return n;
+    });
+  const clear = () => setPicked(new Set());
+  const isShown = (names: string[]) => {
+    const active = names.some((n) => picked.has(n));
+    return (name: string) => !active || picked.has(name);
+  };
+  return { picked, toggle, clear, isShown };
+}
+
+export function Chart({
+  series: all,
+  unit,
+  range,
+  step,
+  legendRows = 4,
+}: {
+  series: Series[];
+  unit: Unit;
+  range: Range;
+  step: number;
+  /** Legend rows shown before it scrolls. */
+  legendRows?: number;
+}) {
   useChartStyle();
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
   const [hover, setHover] = useState<number | null>(null);
+  const pick = useLegendPick();
 
   useEffect(() => {
     const el = box.current;
@@ -103,55 +138,54 @@ export function Chart({ series, unit, range, step }: { series: Series[]; unit: U
     return () => ro.disconnect();
   }, []);
 
+  // Colours follow a series' place in the full list, so picking doesn't repaint the others.
+  const shownName = pick.isShown(all.map((s) => s.name));
+  const visible = all.map((s, i) => ({ s, i })).filter(({ s }) => shownName(s.name));
+
   const plotW = width - M.left - M.right;
   const plotH = HEIGHT - M.top - M.bottom;
-  const max = useMemo(() => Math.max(0, ...series.flatMap((s) => s.values.map((v) => v[1]))), [series]);
+  const max = Math.max(0, ...visible.flatMap(({ s }) => s.values.map((v) => v[1])));
   const y = niceTicks(max, unit);
   const x = (t: number) => M.left + ((t - range.start) / (range.end - range.start)) * plotW;
   const yPos = (v: number) => M.top + plotH - (v / y.top) * plotH;
   const tt = timeTicks(range.start, range.end, plotW);
 
-  const paths = useMemo(
-    () =>
-      series.map((s) => {
-        let d = "";
-        const dots: [number, number][] = [];
-        let prev: number | null = null;
-        s.values.forEach(([t, v], i) => {
-          const gap = prev === null || t - prev > step * 2.5;
-          const next = s.values[i + 1];
-          const alone = gap && (!next || next[0] - t > step * 2.5);
-          if (alone) dots.push([x(t), yPos(v)]);
-          d += `${gap ? "M" : "L"}${x(t).toFixed(1)},${yPos(v).toFixed(1)}`;
-          prev = t;
-        });
-        return { d, dots };
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [series, width, y.top, range.start, range.end, step],
-  );
+  const paths = visible.map(({ s, i }) => {
+    let d = "";
+    const dots: [number, number][] = [];
+    let prev: number | null = null;
+    s.values.forEach(([t, v], k) => {
+      const gap = prev === null || t - prev > step * 2.5;
+      const next = s.values[k + 1];
+      const alone = gap && (!next || next[0] - t > step * 2.5);
+      if (alone) dots.push([x(t), yPos(v)]);
+      d += `${gap ? "M" : "L"}${x(t).toFixed(1)},${yPos(v).toFixed(1)}`;
+      prev = t;
+    });
+    return { d, dots, i, name: s.name };
+  });
 
   const onMove = (e: React.PointerEvent<SVGRectElement>) => {
     const r = (e.currentTarget as SVGRectElement).getBoundingClientRect();
-    const px = e.clientX - r.left;
-    setHover(range.start + (px / r.width) * (range.end - range.start));
+    setHover(range.start + ((e.clientX - r.left) / r.width) * (range.end - range.start));
   };
 
-  // The hovered time snaps to the nearest point of any series.
+  // The hovered time snaps to the nearest point of any shown series.
   const hoverPoints =
     hover === null
       ? null
-      : series.map((s) => {
-          const i = nearest(s.values, hover);
-          const p = i >= 0 ? s.values[i] : null;
+      : visible.map(({ s }) => {
+          const k = nearest(s.values, hover);
+          const p = k >= 0 ? s.values[k] : null;
           return p && Math.abs(p[0] - hover) <= step * 1.5 ? p : null;
         });
   const hoverT = hoverPoints?.find((p) => p)?.[0] ?? null;
+  const hoverByName = new Map(visible.map(({ s }, k) => [s.name, hoverPoints?.[k] ?? null]));
 
   return (
     <div className="mon-chart">
       <div ref={box} className="relative">
-        <svg width={width} height={HEIGHT} role="img" aria-label={series.map((s) => s.name).join(", ")} className="block select-none">
+        <svg width={width} height={HEIGHT} role="img" aria-label={visible.map(({ s }) => s.name).join(", ")} className="block select-none">
           {y.ticks.map((t) => (
             <g key={t}>
               <line x1={M.left} x2={width - M.right} y1={yPos(t)} y2={yPos(t)} stroke="var(--color-line)" strokeWidth={1} />
@@ -160,14 +194,16 @@ export function Chart({ series, unit, range, step }: { series: Series[]; unit: U
               </text>
             </g>
           ))}
-          {tt.ticks.filter((t) => x(t) > M.left + 20 && x(t) < width - 30).map((t) => (
-            <text key={t} x={x(t)} y={HEIGHT - 6} textAnchor="middle" className="fill-muted text-[11px]">
-              {timeLabel(t, tt.step)}
-            </text>
-          ))}
-          {paths.map((p, i) => (
-            <g key={series[i].name} stroke={seriesColor(i)} fill={seriesColor(i)}>
-              <path d={p.d} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          {tt.ticks
+            .filter((t) => x(t) > M.left + 20 && x(t) < width - 30)
+            .map((t) => (
+              <text key={t} x={x(t)} y={HEIGHT - 6} textAnchor="middle" className="fill-muted text-[11px]">
+                {timeLabel(t, tt.step)}
+              </text>
+            ))}
+          {paths.map((p) => (
+            <g key={p.name} stroke={seriesColor(p.i)} fill={seriesColor(p.i)}>
+              <path d={p.d} fill="none" strokeWidth={2} strokeDasharray={seriesDash(p.i)} strokeLinejoin="round" strokeLinecap="round" />
               {p.dots.map(([cx, cy]) => (
                 <circle key={`${cx},${cy}`} cx={cx} cy={cy} r={2} stroke="none" />
               ))}
@@ -177,9 +213,9 @@ export function Chart({ series, unit, range, step }: { series: Series[]; unit: U
             <g>
               <line x1={x(hoverT)} x2={x(hoverT)} y1={M.top} y2={M.top + plotH} stroke="var(--color-muted)" strokeWidth={1} strokeDasharray="3 3" />
               {hoverPoints!.map(
-                (p, i) =>
+                (p, k) =>
                   p && (
-                    <circle key={i} cx={x(p[0])} cy={yPos(p[1])} r={4} fill={seriesColor(i)} stroke="var(--color-panel)" strokeWidth={2} />
+                    <circle key={k} cx={x(p[0])} cy={yPos(p[1])} r={4} fill={seriesColor(visible[k].i)} stroke="var(--color-panel)" strokeWidth={2} />
                   ),
               )}
             </g>
@@ -196,52 +232,121 @@ export function Chart({ series, unit, range, step }: { series: Series[]; unit: U
         </svg>
         {hoverT !== null && (
           <div
-            className="pointer-events-none absolute top-1 z-10 min-w-40 rounded-md border border-line bg-panel px-3 py-2 text-xs shadow-lg"
+            className="pointer-events-none absolute top-1 z-10 max-h-[180px] min-w-40 overflow-hidden rounded-md border border-line bg-panel px-3 py-2 text-xs shadow-lg"
             style={x(hoverT) > width / 2 ? { right: width - x(hoverT) + 10 } : { left: x(hoverT) + 10 }}
           >
             <div className="mb-1 font-medium text-ink">{fullTime(hoverT)}</div>
-            {series.map((s, i) => (
+            {visible.map(({ s, i }, k) => (
               <div key={s.name} className="flex items-center gap-2 whitespace-nowrap">
-                <span className="inline-block size-2.5 shrink-0 rounded-sm" style={{ background: seriesColor(i) }} />
+                <Swatch i={i} />
                 <span className="min-w-0 flex-1 truncate text-muted">{s.name}</span>
-                <span className="font-mono text-ink">{fmt(hoverPoints![i]?.[1], unit)}</span>
+                <span className="font-mono text-ink">{fmt(hoverPoints![k]?.[1], unit)}</span>
               </div>
             ))}
           </div>
         )}
       </div>
-      <Legend series={series} unit={unit} highlight={hoverPoints} />
+      <Legend series={all} unit={unit} rows={legendRows} pick={pick} shown={shownName} hover={hoverT !== null ? hoverByName : null} />
     </div>
   );
 }
 
-function Legend({ series, unit, highlight }: { series: Series[]; unit: Unit; highlight: ([number, number] | null)[] | null }) {
+/** A short line in the series' colour and dash pattern. */
+export function Swatch({ i }: { i: number }) {
   return (
-    <table className="mt-2 w-full table-fixed text-xs">
-      <thead className="text-muted">
-        <tr>
-          <th className="py-1 text-left font-normal">{series.length > 1 ? tr("Series") : ""}</th>
-          <th className="w-24 py-1 text-right font-normal">{tr("Last")}</th>
-          <th className="w-24 py-1 text-right font-normal">{tr("Avg")}</th>
-          <th className="w-24 py-1 text-right font-normal">{tr("Max")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {series.map((s, i) => {
-          const st = stats(s.values);
-          return (
-            <tr key={s.name} className={cn("border-t border-line", highlight && !highlight[i] && "opacity-60")}>
-              <td className="truncate py-1" title={s.name}>
-                <span className="mr-2 inline-block size-2.5 rounded-sm align-middle" style={{ background: seriesColor(i) }} />
-                {s.name}
-              </td>
-              <td className="py-1 text-right font-mono">{fmt(st.last, unit)}</td>
-              <td className="py-1 text-right font-mono">{fmt(st.avg, unit)}</td>
-              <td className="py-1 text-right font-mono">{fmt(st.max, unit)}</td>
+    <svg width="14" height="10" className="inline-block shrink-0 align-middle" aria-hidden>
+      <line x1="1" x2="13" y1="5" y2="5" stroke={seriesColor(i)} strokeWidth="3" strokeLinecap="round" strokeDasharray={seriesDash(i) ? "3 2" : undefined} />
+    </svg>
+  );
+}
+
+const ROW = 28;
+
+/**
+ * The legend table: last / avg / max per series, `rows` rows tall before it scrolls. Ticking
+ * series shows only those in the chart; with none ticked every series is shown.
+ */
+function Legend({
+  series,
+  unit,
+  rows,
+  pick,
+  shown,
+  hover,
+}: {
+  series: Series[];
+  unit: Unit;
+  rows: number;
+  pick: ReturnType<typeof useLegendPick>;
+  shown: (name: string) => boolean;
+  hover: Map<string, [number, number] | null> | null;
+}) {
+  const active = series.some((s) => pick.picked.has(s.name));
+  const many = series.length > 1;
+  return (
+    <div className="mt-2">
+      <div className="overflow-y-auto" style={{ maxHeight: ROW * (rows + 1) }}>
+        <table className="w-full table-fixed text-xs">
+          <thead className="sticky top-0 z-[1] bg-panel text-muted">
+            <tr style={{ height: ROW }}>
+              <th className="text-left font-normal">
+                {many ? (
+                  <span className="flex items-center gap-2">
+                    {tr("Series")}
+                    {active && (
+                      <button type="button" className="text-cable hover:underline" onClick={pick.clear}>
+                        {tr("Show all")}
+                      </button>
+                    )}
+                  </span>
+                ) : (
+                  ""
+                )}
+              </th>
+              <th className="w-24 text-right font-normal">{tr("Last")}</th>
+              <th className="w-24 text-right font-normal">{tr("Avg")}</th>
+              <th className="w-24 text-right font-normal">{tr("Max")}</th>
             </tr>
-          );
-        })}
-      </tbody>
-    </table>
+          </thead>
+          <tbody>
+            {series.map((s, i) => {
+              const st = stats(s.values);
+              const on = shown(s.name);
+              return (
+                <tr
+                  key={s.name}
+                  style={{ height: ROW }}
+                  className={cn("border-t border-line", (!on || (hover && !hover.get(s.name))) && "opacity-50")}
+                >
+                  <td className="truncate" title={s.name}>
+                    {many ? (
+                      <label className="flex min-w-0 cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 shrink-0 accent-[var(--color-cable)]"
+                          checked={pick.picked.has(s.name)}
+                          onChange={() => pick.toggle(s.name)}
+                          aria-label={tr("Show only the ticked series")}
+                        />
+                        <Swatch i={i} />
+                        <span className="truncate">{s.name}</span>
+                      </label>
+                    ) : (
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Swatch i={i} />
+                        <span className="truncate">{s.name}</span>
+                      </span>
+                    )}
+                  </td>
+                  <td className="text-right font-mono">{fmt(st.last, unit)}</td>
+                  <td className="text-right font-mono">{fmt(st.avg, unit)}</td>
+                  <td className="text-right font-mono">{fmt(st.max, unit)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

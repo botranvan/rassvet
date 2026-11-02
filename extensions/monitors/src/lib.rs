@@ -43,8 +43,6 @@ use settings::Settings;
 
 pub const ID: &str = "monitors";
 
-/// Most time series drawn in one chart; the quietest ones beyond it are left out.
-const MAX_SERIES: usize = 8;
 /// Points per series a chart asks for (the step follows from the time range).
 const MAX_POINTS: i64 = 300;
 /// The default time range: the last hour.
@@ -708,6 +706,7 @@ async fn query(
 
     let mut results = Vec::new();
     let mut hidden = 0;
+    let mut shown = 0;
     for (i, query) in p.queries.iter().enumerate() {
         let expr = dashboards::render(&query.expr, &vars);
         let mut got = match query.chart {
@@ -737,7 +736,10 @@ async fn query(
             })
             .collect();
         if query.chart == ChartType::TimeSeries {
-            hidden += keep_loudest(&mut series, MAX_SERIES);
+            // The panel's max_series counts every time series query of the panel.
+            let room = p.max_series.saturating_sub(shown);
+            hidden += keep_loudest(&mut series, room);
+            shown += series.len();
         }
         results.push(OutQuery {
             chart: query.chart,
