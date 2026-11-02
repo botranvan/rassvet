@@ -34,6 +34,7 @@
       <nav class="nav__links" aria-label="Main">
         <a href="#features">Features</a>
         <a href="#palette">Palette</a>
+        <a href="#clouds">Multi-cloud</a>
         <a href="#monitors">Monitors</a>
         <a href="#extensions">Extensions</a>
         <a href="#design">Design</a>
@@ -64,8 +65,8 @@
     <section class="hero">
       <div class="container hero__grid">
         <div class="hero__copy">
-          <a class="pill reveal" href="#start">
-            <span class="pill__dot"></span> v0.1 · OpenStack 2026.2 Hibiscus ready
+          <a class="pill reveal" href="#clouds">
+            <span class="pill__new">New</span> Many clouds, one dashboard. Sign in once, switch in one click
             <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
           </a>
           <h1 class="hero__title reveal">
@@ -74,7 +75,7 @@
           <p class="hero__lead reveal">
             <strong>Rassvet</strong> <em>(рассвет — “dawn”)</em> is a single-binary dashboard for OpenStack.
             Rust on the server, React in the browser, Keystone tokens never leave the backend.
-            Built for the people who live in their cloud every day.
+            Sign in to every cloud you run and switch between them in one click. Built for the people who live in their clouds every day.
           </p>
           <div class="hero__cta reveal">
             <a class="btn btn--primary magnetic" href="#start">
@@ -87,8 +88,8 @@
           </div>
           <dl class="stats reveal">
             <div><dt data-count="1">0</dt><dd>binary to deploy</dd></div>
+            <div><dt>All</dt><dd>your clouds in one session</dd></div>
             <div><dt data-count="7">0</dt><dd>core services</dd></div>
-            <div><dt data-count="4">0</dt><dd>built-in extensions</dd></div>
             <div><dt data-count="25" data-suffix="+">0</dt><dd>resource kinds searchable</dd></div>
           </dl>
         </div>
@@ -187,10 +188,12 @@
             <p>Opaque HttpOnly cookies, CSRF headers, sign-in throttling, encrypted memcached sessions.</p>
           </article>
 
-          <article class="card spot reveal">
+          <article class="card card--feature spot reveal">
+            <span class="card__badge">Highlight</span>
             <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg></div>
-            <h3>Many clouds, one session</h3>
-            <p>Sign in to several clouds and switch per tab. Each keeps its own Keystone tokens.</p>
+            <h3>Many clouds, one dashboard</h3>
+            <p>Sign in to all your clouds at once and switch per tab without signing in again.</p>
+            <a class="card__link" href="#clouds">See how →</a>
           </article>
 
           <article class="card spot reveal">
@@ -244,6 +247,163 @@
             <ul class="demo__results" id="demo-results"></ul>
             <div class="demo__foot"><span>↑↓ to move</span><span>↵ to open</span><span class="r">Names or a pasted UUID find resources</span></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== MULTI-CLOUD -->
+    <section class="section section--clouds" id="clouds">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Multi-cloud</span>
+          <h2>Every cloud you run.<br><span class="grad">One dashboard, one session.</span></h2>
+          <p>Lab, staging and production. Hanoi and Saigon. Your own OpenStack and a customer's. Sign in to all of
+            them once and switch in one click. No second browser, no private windows, no signing in again.</p>
+        </header>
+
+        <div class="clouds">
+          <!-- Interactive demo -->
+          <div class="mc reveal" id="mc">
+            <div class="mc__tabs" aria-label="Browser tabs, one per cloud">
+              <div class="mc__tabstrip" id="mc-tabstrip"></div>
+              <span class="mc__hint">each tab keeps its own cloud</span>
+            </div>
+            <div class="mc__win">
+              <div class="mc__top">
+                <img src="assets/img/logo.svg" alt="" width="20" height="20"><b>rassvet</b>
+                <div class="mc__spacer"></div>
+                <div class="mc__menu-wrap">
+                  <button class="mc__btn mc__btn--cloud" id="mc-cloud-btn" aria-haspopup="menu" aria-expanded="false">
+                    <svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg>
+                    <span id="mc-cloud-name">Hanoi lab</span>
+                    <svg viewBox="0 0 24 24" class="chev"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+                  </button>
+                  <div class="mc__menu" id="mc-menu" role="menu" hidden>
+                    <div class="mc__menu-h">Signed in to</div>
+                    <ul id="mc-list"></ul>
+                    <button class="mc__add" id="mc-add" role="menuitem">
+                      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Sign in to another cloud
+                    </button>
+                  </div>
+                </div>
+                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="mc-project">admin</span></span>
+                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span id="mc-region">RegionOne</span></span>
+              </div>
+              <div class="mc__body" id="mc-body">
+                <div class="mc__title">
+                  <div>
+                    <h4 id="mc-heading">admin</h4>
+                    <p id="mc-sub">Signed in as admin on Hanoi lab, region RegionOne.</p>
+                  </div>
+                  <span class="mc__badge" id="mc-badge"><span class="led led--green"></span><span id="mc-release">2026.2 Hibiscus</span></span>
+                </div>
+                <div class="mc__quota" id="mc-quota"></div>
+                <div class="mc__svc" id="mc-svc"></div>
+              </div>
+
+              <!-- sign-in dialog for "Sign in to another cloud" -->
+              <div class="mc__dlg" id="mc-dlg" hidden>
+                <div class="mc__dlg-card">
+                  <h5>Sign in to another cloud</h5>
+                  <label>Cloud<span class="mc__field" id="mc-dlg-cloud">Production</span></label>
+                  <label>Username<span class="mc__field mc__field--type" id="mc-dlg-user"></span></label>
+                  <label>Password<span class="mc__field" id="mc-dlg-pass"></span></label>
+                  <div class="mc__dlg-actions"><span class="mc__ok" id="mc-dlg-ok">Sign in</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="mc__foot">
+              <span><kbd>Click</kbd> the cloud menu to switch, add, or sign out of one cloud</span>
+              <button class="mc__reset" id="mc-reset">Reset demo</button>
+            </div>
+          </div>
+
+          <!-- Benefits -->
+          <div class="clouds__copy">
+            <ul class="benefits">
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></div>
+                <div><h4>Switch in one click, no password</h4>
+                <p>Pick a cloud from <b>Signed in to</b> in the top bar, or press <kbd>⌘K</kbd> and type its name. You land on
+                  the same page in the other cloud, with the user and project you use there.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M8 4v5"/></svg></div>
+                <div><h4>One tab per cloud, side by side</h4>
+                <p>Each browser tab remembers its own cloud. Keep lab on the left and production on the right, and compare
+                  flavors, images or security groups while you work.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+                <div><h4>Separate credentials, kept apart</h4>
+                <p>Every cloud has its own accounts and its own Keystone tokens, stored on the server and never mixed.
+                  When one token expires, only that cloud is signed out.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
+                <div><h4>Leave one cloud or all of them</h4>
+                <p>The sign-out icon next to a cloud leaves only that cloud. <b>Sign out</b> in the account menu leaves every
+                  cloud at once.</p></div>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- How it works -->
+        <div class="flow">
+          <div class="flow__step reveal"><span class="flow__n">1</span><h4>Sign in once</h4><p>Pick a <b>Cloud</b> on the sign-in page and use a password or an application credential.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">2</span><h4>Add another cloud</h4><p>Cloud menu → <b>Sign in to another cloud</b>. Enter that cloud's credentials and stay signed in to the others.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">3</span><h4>Switch freely</h4><p>Cloud menu, <kbd>⌘K</kbd>, or a different tab. Every page reloads its data for the cloud you picked.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">4</span><h4>Expiry handled</h4><p>When a cloud's sign-in expires, its tabs move to a cloud you are still signed in to.</p></div>
+        </div>
+
+        <!-- Use cases + under the hood -->
+        <div class="clouds__grid">
+          <div class="usecases reveal">
+            <h3>Made for</h3>
+            <ul>
+              <li><b>Platform teams</b><span>running lab, staging and production clouds, and promoting changes between them.</span></li>
+              <li><b>Multi-site operators</b><span>with one OpenStack per datacenter or country, each with its own Keystone.</span></li>
+              <li><b>Service providers</b><span>who look after several customer clouds from one browser.</span></li>
+              <li><b>Migrations</b><span>moving workloads from an old cloud to a new one, with both open side by side.</span></li>
+            </ul>
+          </div>
+
+          <div class="code reveal">
+            <div class="code__bar"><span>rassvet.toml: one block per cloud</span><button class="copy" data-copy="#clouds-src">Copy</button></div>
+<pre id="clouds-src"><code>[[<span class="t">cloud</span>]]
+<span class="k">id</span>       = <span class="s">"hanoi"</span>
+<span class="k">name</span>     = <span class="s">"Hanoi lab"</span>
+<span class="k">auth_url</span> = <span class="s">"https://keystone.hn.example.com:5000/v3"</span>
+<span class="k">default_domain</span> = <span class="s">"Default"</span>
+
+[[<span class="t">cloud</span>]]
+<span class="k">id</span>       = <span class="s">"saigon"</span>
+<span class="k">name</span>     = <span class="s">"Saigon lab"</span>
+<span class="k">auth_url</span> = <span class="s">"https://keystone.sg.example.com:5000/v3"</span>
+<span class="k">interface</span> = <span class="s">"public"</span>   <span class="c"># public | internal | admin</span></code></pre>
+          </div>
+
+          <div class="hood reveal">
+            <h3>Under the hood</h3>
+            <dl>
+              <div><dt><code>X-Rassvet-Cloud</code></dt><dd>Every request names its cloud, so each tab works on its own one. Downloads use <code>?rassvet_cloud=</code>.</dd></div>
+              <div><dt>Per-cloud tokens</dt><dd>The session lasts until its last cloud's token expires, within the idle and maximum limits.</dd></div>
+              <div><dt>Per-cloud microversions</dt><dd>Negotiated with each cloud, so clouds on different releases work together.</dd></div>
+              <div><dt>Shared via memcached</dt><dd>Multi-cloud sessions survive restarts and work behind a load balancer.</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="clouds__shots">
+          <figure class="shot-card reveal" data-lightbox="assets/img/cloud-menu.png">
+            <img src="assets/img/cloud-menu.png" alt="Cloud menu signed in to Hanoi lab and Saigon lab" loading="lazy">
+            <figcaption>The cloud menu: signed in to two clouds, each with its own user and project.</figcaption>
+          </figure>
+          <figure class="shot-card reveal" data-lightbox="assets/img/palette-cloud.png">
+            <img src="assets/img/palette-cloud.png" alt="Switch cloud from the command palette" loading="lazy">
+            <figcaption>Or press ⌘K and type the cloud's name.</figcaption>
+          </figure>
         </div>
       </div>
     </section>

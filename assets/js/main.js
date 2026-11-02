@@ -678,4 +678,120 @@ ${k("export const")} cleanup: ${t("CleanupContribution")} = {
     fig.addEventListener("keydown", (e) => { if (e.key === "Enter") openIt(); });
   });
   lb.addEventListener("click", closeLightbox);
+
+  /* ------------------------------------------------ multi-cloud demo */
+  {
+    const CLOUDS = {
+      hanoi: { name: "Hanoi lab", user: "admin", project: "admin", region: "RegionOne", release: "2026.2 Hibiscus", c: "#22b5b0",
+        quota: [["Instances", 11, 20], ["vCPUs", 12, 40], ["RAM", 21, 100, " GiB"], ["Floating IPs", 2, 5], ["Volumes", 6, 20], ["Networks", 7, 10]],
+        svc: ["Nova", "Neutron", "Cinder", "Glance", "Octavia", "-Magnum"] },
+      saigon: { name: "Saigon lab", user: "alice", project: "web-team", region: "RegionOne", release: "2026.1 Gazpacho", c: "#2d8cff",
+        quota: [["Instances", 4, 10], ["vCPUs", 8, 20], ["RAM", 16, 50, " GiB"], ["Floating IPs", 1, 3], ["Volumes", 3, 10], ["Networks", 2, 5]],
+        svc: ["Nova", "Neutron", "Cinder", "Glance", "Designate", "Swift"] },
+      prod: { name: "Production", user: "ops", project: "platform", region: "RegionTwo", release: "2026.2 Hibiscus", c: "#ff9f1c",
+        quota: [["Instances", 86, 200], ["vCPUs", 312, 800], ["RAM", 1180, 3200, " GiB"], ["Floating IPs", 41, 64], ["Volumes", 140, 400], ["Networks", 18, 40]],
+        svc: ["Nova", "Neutron", "Cinder", "Glance", "Octavia", "Magnum", "Designate", "Monitors"] },
+    };
+    const mc = $("#mc");
+    const el = (id) => $("#mc-" + id);
+    const btn = el("cloud-btn"), menu = el("menu"), list = el("list"), add = el("add"), body = el("body"), dlg = el("dlg");
+    let signed, current, auto, touched;
+    const icoOut = '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>';
+    const icoCheck = '<svg viewBox="0 0 24 24" class="mc__check"><path d="m5 12 5 5 9-10"/></svg>';
+
+    const renderTabs = () => {
+      el("tabstrip").innerHTML = signed.map((id) =>
+        `<button class="mc__tab${id === current ? " is-active" : ""}" data-tab="${id}" style="--c:${CLOUDS[id].c}"><i></i>${CLOUDS[id].name} · Overview</button>`).join("");
+    };
+    const renderMenu = () => {
+      list.innerHTML = signed.map((id) => {
+        const c = CLOUDS[id];
+        return `<li class="mc__item${id === current ? " is-current" : ""}" style="--c:${c.c}">
+          <button class="mc__pick" data-pick="${id}" role="menuitem"><i></i><span><b>${c.name}</b><small>${c.user} · ${c.project}</small></span>${id === current ? icoCheck : ""}</button>
+          <button class="mc__out" data-out="${id}" aria-label="Sign out of ${c.name}" ${signed.length < 2 ? "disabled" : ""}>${icoOut}</button></li>`;
+      }).join("");
+      const all = signed.includes("prod");
+      add.disabled = all;
+      add.lastChild.textContent = all ? " All demo clouds signed in" : " Sign in to another cloud";
+    };
+    const renderBody = (animate) => {
+      const c = CLOUDS[current];
+      mc.style.setProperty("--cc", c.c);
+      el("cloud-name").textContent = c.name;
+      el("project").textContent = c.project;
+      el("region").textContent = c.region;
+      el("heading").textContent = c.project;
+      el("sub").textContent = `Signed in as ${c.user} on ${c.name}, region ${c.region}.`;
+      el("release").textContent = c.release;
+      el("quota").innerHTML = c.quota.map(([n, u, m, suf = ""]) =>
+        `<div><div class="q__row"><b>${n}</b><span>${u}${suf} of ${m}${suf}</span></div><div class="q__bar"><i data-w="${(u / m) * 100}"></i></div></div>`).join("");
+      el("svc").innerHTML = c.svc.map((x) => x[0] === "-" ? `<span class="off">${x.slice(1)}</span>` : `<span>${x}</span>`).join("");
+      requestAnimationFrame(() => requestAnimationFrame(() => $$(".q__bar i", body).forEach((b) => (b.style.width = b.dataset.w + "%"))));
+      if (animate && !reduced) { body.classList.remove("is-switching"); void body.offsetWidth; body.classList.add("is-switching"); }
+    };
+    const render = (animate) => { renderTabs(); renderMenu(); renderBody(animate); };
+    const switchTo = (id, why) => {
+      if (id === current || !signed.includes(id)) return;
+      current = id;
+      render(true);
+      if (why) toast(why);
+    };
+    const stopAuto = () => { touched = true; clearInterval(auto); };
+    const openMenu = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+
+    const reset = () => { signed = ["hanoi", "saigon"]; current = "hanoi"; dlg.hidden = true; openMenu(false); render(true); };
+
+    btn.addEventListener("click", (e) => { e.stopPropagation(); stopAuto(); openMenu(menu.hidden); });
+    document.addEventListener("click", (e) => { if (!menu.hidden && !e.target.closest(".mc__menu-wrap")) openMenu(false); });
+    mc.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden) { e.stopPropagation(); openMenu(false); btn.focus(); } });
+    list.addEventListener("click", (e) => {
+      const pick = e.target.closest("[data-pick]"), out = e.target.closest("[data-out]");
+      if (pick) { openMenu(false); switchTo(pick.dataset.pick, `Switched to ${CLOUDS[pick.dataset.pick].name}. No password needed`); }
+      if (out && signed.length > 1) {
+        const id = out.dataset.out;
+        signed = signed.filter((x) => x !== id);
+        if (id === current) { current = signed[0]; toast(`Signed out of ${CLOUDS[id].name}. Its tabs moved to ${CLOUDS[current].name}`); }
+        else toast(`Signed out of ${CLOUDS[id].name} only`);
+        render(true);
+      }
+    });
+    el("tabstrip").addEventListener("click", (e) => { const t = e.target.closest("[data-tab]"); if (t) { stopAuto(); switchTo(t.dataset.tab); } });
+    el("reset").addEventListener("click", () => { stopAuto(); reset(); });
+
+    const typeInto = async (node, text, mask) => { node.textContent = ""; for (const ch of text) { node.textContent += mask ? "•" : ch; await sleep(reduced ? 0 : 70); } };
+    add.addEventListener("click", async () => {
+      if (add.disabled) return;
+      stopAuto(); openMenu(false);
+      dlg.hidden = false;
+      el("dlg-user").textContent = ""; el("dlg-pass").textContent = "";
+      await sleep(300);
+      await typeInto(el("dlg-user"), "ops");
+      await typeInto(el("dlg-pass"), "correcthorse", true);
+      await sleep(250);
+      el("dlg-ok").classList.add("is-press"); await sleep(160); el("dlg-ok").classList.remove("is-press");
+      await sleep(200);
+      dlg.hidden = true;
+      signed.push("prod");
+      current = "prod";
+      render(true);
+      toast("Signed in to Production. Still signed in to the others");
+    });
+
+    reset();
+    new IntersectionObserver((e) => {
+      clearInterval(auto);
+      if (!e[0].isIntersecting || touched || reduced) return;
+      auto = setInterval(() => {
+        if (!menu.hidden || !dlg.hidden) return;
+        switchTo(signed[(signed.indexOf(current) + 1) % signed.length]);
+      }, 3600);
+    }, { threshold: 0.4 }).observe(mc);
+
+    // Palette entries
+    commands.splice(2, 0, { g: "Sections", i: "globe", l: "Multi-cloud", k: "several clouds switch sign in one session tabs", run: go("#clouds") });
+    Object.entries(CLOUDS).forEach(([id, c]) => commands.splice(commands.findIndex((x) => x.g === "Links"), 0, {
+      g: "Demo clouds", i: "globe", l: `Switch demo cloud to ${c.name}`, k: `cloud switch ${id}`,
+      run: () => { go("#clouds")(); stopAuto(); if (!signed.includes(id)) { signed.push(id); } switchTo(id, `Switched to ${c.name}`); },
+    }));
+  }
 })();
