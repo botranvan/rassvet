@@ -20,6 +20,9 @@ panels there are; the ones below are the built-in panels.
    start and an end (no earlier than 60 days ago). Rassvet refreshes the charts every minute, and **↻**
    refreshes them right away.
 
+Some dashboards have more dropdowns next to **Instance**, set up by your administrator (for example a
+flavor or a disk). Their choices apply to every panel of the page and are kept in the page's address.
+
 Point at a chart to see every series' value at that time. Under each chart, a table gives the **last**,
 **average** and **maximum** value of each series in the range. Panels can also show single values (as
 numbers or gauges) and pie charts; those show the value at the end of the time range.

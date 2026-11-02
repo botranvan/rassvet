@@ -4789,6 +4789,7 @@ const vi: Record<string, string> = {
   "Last 30 minutes": "30 phút qua",
   "Last 3 hours": "3 giờ qua",
   "Last 2 days": "2 ngày qua",
+  "No values in this time range": "Không có giá trị nào trong khoảng thời gian này",
 };
 
 export default vi;

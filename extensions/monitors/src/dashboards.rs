@@ -114,16 +114,16 @@ struct EntryDef {
     panels: Vec<PanelDef>,
 }
 
-/// `variables:` as a list of one-key maps (`- monitor: cloud-infras`) or as one map.
+/// `variables:` as a list of one-key maps (`- monitor: cloud-infras`) or as one map, in order.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum VarsDef {
-    List(Vec<std::collections::BTreeMap<String, serde_yaml::Value>>),
-    Map(std::collections::BTreeMap<String, serde_yaml::Value>),
+    List(Vec<serde_yaml::Mapping>),
+    Map(serde_yaml::Mapping),
 }
 
 impl VarsDef {
-    fn pairs(self) -> Vec<(String, serde_yaml::Value)> {
+    fn pairs(self) -> Vec<(serde_yaml::Value, serde_yaml::Value)> {
         match self {
             VarsDef::List(l) => l.into_iter().flatten().collect(),
             VarsDef::Map(m) => m.into_iter().collect(),
@@ -167,13 +167,90 @@ pub struct Dashboard {
     pub id: String,
     pub title: String,
     pub kind: Kind,
-    /// The dashboard's own variables (`variables:`), e.g. `monitor` → `cloud-infras`.
-    #[serde(skip)]
-    pub variables: std::collections::BTreeMap<String, String>,
+    /// The dashboard's own variables (`variables:`), in order: constants such as `monitor` →
+    /// `cloud-infras`, and query variables (`label_values(...)`) picked in the UI.
+    pub variables: Vec<Variable>,
+    /// Whether the page shows Rassvet's instance / server picker (from `discover`). A physical
+    /// dashboard that defines `compute_node_id` or `hostname` as variables uses those instead.
+    pub server_picker: bool,
     /// Series selector listing the instances / servers to pick from.
     #[serde(skip)]
     pub discover: String,
     pub panels: Vec<Panel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VarValue {
+    Constant(String),
+    /// `label_values(<selector>, <label>)`, or `label_values(<label>)` without a selector.
+    LabelValues {
+        selector: Option<String>,
+        label: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct Variable {
+    pub name: String,
+    /// A query variable, picked in the UI; constants aren't shown.
+    pub query: bool,
+    #[serde(skip)]
+    pub value: VarValue,
+    /// As written, to compare definitions of the same variable in several entries.
+    #[serde(skip)]
+    raw: String,
+}
+
+impl Dashboard {
+    pub fn var(&self, name: &str) -> Option<&Variable> {
+        self.variables.iter().find(|v| v.name == name)
+    }
+
+    /// `(name, value)` of the constant variables.
+    pub fn constants(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.variables.iter().filter_map(|v| match &v.value {
+            VarValue::Constant(c) => Some((v.name.as_str(), c.as_str())),
+            VarValue::LabelValues { .. } => None,
+        })
+    }
+}
+
+/// `label_values(<selector>, <label>)` or `label_values(<label>)` (Grafana's syntax);
+/// `None` when `s` isn't a `label_values` call.
+fn parse_label_values(s: &str) -> Option<Result<VarValue, String>> {
+    let inner = s.trim().strip_prefix("label_values")?.trim_start();
+    let inner = inner.strip_prefix('(')?.strip_suffix(')')?;
+    // The last comma outside braces, parentheses and quotes splits selector and label.
+    let (mut depth, mut quote, mut split) = (0i32, None::<char>, None);
+    let mut prev = ' ';
+    for (i, c) in inner.char_indices() {
+        match quote {
+            Some(q) if c == q && prev != '\\' => quote = None,
+            Some(_) => {}
+            None => match c {
+                '"' | '\'' | '`' => quote = Some(c),
+                '{' | '(' | '[' => depth += 1,
+                '}' | ')' | ']' => depth -= 1,
+                ',' if depth == 0 => split = Some(i),
+                _ => {}
+            },
+        }
+        prev = c;
+    }
+    let (selector, label) = match split {
+        Some(i) => (Some(inner[..i].trim().to_owned()), inner[i + 1..].trim()),
+        None => (None, inner.trim()),
+    };
+    if !valid_var_name(label) {
+        return Some(Err(format!("{label:?} is not a label name")));
+    }
+    if selector.as_deref() == Some("") {
+        return Some(Err("the series selector is empty".into()));
+    }
+    Some(Ok(VarValue::LabelValues {
+        selector,
+        label: label.to_owned(),
+    }))
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +305,17 @@ pub const VARS: &[&str] = &[
     "__interval",
     "__range",
 ];
+
+/// Built-in names a dashboard's own variables may not use: `project_id`, `guest_id` and
+/// `region` always, `compute_node_id` and `hostname` in instance dashboards (a physical
+/// dashboard may define them, e.g. with `label_values`, instead of using the server picker).
+fn reserved(kind: Kind, name: &str) -> bool {
+    name.starts_with("__")
+        || match kind {
+            Kind::Instance => VARS.contains(&name),
+            Kind::Physical => ["project_id", "guest_id", "region"].contains(&name),
+        }
+}
 
 /// Built-in variables `discover` may use (besides the dashboard's own).
 const DISCOVER_VARS: &[&str] = &["project_id", "region"];
@@ -326,48 +414,104 @@ pub fn parse(sources: &[(String, String)]) -> anyhow::Result<Catalog> {
             add(&mut cat, src, e)?;
         }
     }
-    cat.dashboards.retain(|d| !d.panels.is_empty());
-    for d in &cat.dashboards {
+    for d in &mut cat.dashboards {
         check_vars(d)?;
     }
+    cat.dashboards.retain(|d| !d.panels.is_empty());
     Ok(cat)
 }
 
-/// Every variable used must be built in or one of the dashboard's own (checked once all files
-/// are merged: variables and panels of a dashboard may come from different files).
-fn check_vars(d: &Dashboard) -> anyhow::Result<()> {
-    let known = |v: &str, builtin: &[&str]| builtin.contains(&v) || d.variables.contains_key(v);
-    let own = || {
-        if d.variables.is_empty() {
-            String::new()
-        } else {
-            format!(
-                ", ${}",
-                d.variables.keys().cloned().collect::<Vec<_>>().join(", $")
-            )
-        }
-    };
-    for v in vars_in(&d.discover) {
-        if !known(&v, DISCOVER_VARS) {
+/// Check the variables of a merged dashboard (variables and panels of a dashboard may come
+/// from different files): names, the order of query variables, and that every variable used
+/// is built in or defined.
+fn check_vars(d: &mut Dashboard) -> anyhow::Result<()> {
+    let id = d.id.clone();
+    for v in &d.variables {
+        if reserved(d.kind, &v.name) {
             bail!(
-                "dashboard {:?}: `discover` uses ${v}, which is not defined (it may use $project_id, $region{})",
-                d.id,
-                own()
+                "dashboard {id:?}: variable {:?} is built in and can't be defined here",
+                v.name
             );
         }
     }
+    d.server_picker = d.kind == Kind::Instance
+        || (d.var("compute_node_id").is_none() && d.var("hostname").is_none());
+    let names = |filter: &dyn Fn(&Variable) -> bool| -> Vec<&str> {
+        d.variables
+            .iter()
+            .filter(|v| filter(v))
+            .map(|v| v.name.as_str())
+            .collect()
+    };
+    let list = |known: &[&str]| format!("${}", known.join(", $"));
+
+    // Query variables may use built-ins, constants and the query variables before them.
+    for (i, v) in d.variables.iter().enumerate() {
+        let VarValue::LabelValues { selector, .. } = &v.value else {
+            continue;
+        };
+        let at = format!("dashboard {id:?}, variable {:?}", v.name);
+        let Some(sel) = selector else {
+            if d.kind == Kind::Instance {
+                bail!(
+                    "{at}: in an instance dashboard, use label_values(<selector with project_id=\"$project_id\">, <label>)"
+                );
+            }
+            continue;
+        };
+        let mut known: Vec<&str> = vec!["region"];
+        match d.kind {
+            Kind::Instance => known.push("project_id"),
+            Kind::Physical if d.server_picker => known.extend(["compute_node_id", "hostname"]),
+            Kind::Physical => {}
+        }
+        known.extend(names(&|o: &Variable| !o.query));
+        known.extend(
+            d.variables[..i]
+                .iter()
+                .filter(|o| o.query)
+                .map(|o| o.name.as_str()),
+        );
+        let used = vars_in(sel);
+        for u in &used {
+            if !known.contains(&u.as_str()) {
+                bail!(
+                    "{at}: uses ${u}, which is not defined before it (it may use {})",
+                    list(&known)
+                );
+            }
+        }
+        if d.kind == Kind::Instance && !used.iter().any(|u| u == "project_id") {
+            bail!(
+                "{at}: in an instance dashboard, the selector must match project_id=~\"$project_id\", \
+                 so project users only get their own project's values"
+            );
+        }
+    }
+
+    let mut discover_known: Vec<&str> = DISCOVER_VARS.to_vec();
+    discover_known.extend(names(&|o: &Variable| !o.query));
+    for v in vars_in(&d.discover) {
+        if !discover_known.contains(&v.as_str()) {
+            bail!(
+                "dashboard {id:?}: `discover` uses ${v}, which it can't (it may use {})",
+                list(&discover_known)
+            );
+        }
+    }
+
+    let mut known: Vec<&str> = VARS.to_vec();
+    known.extend(names(&|_| true));
     for p in &d.panels {
         for (i, q) in p.queries.iter().enumerate() {
             for v in vars_in(&q.expr) {
-                if !known(&v, VARS) {
+                if !known.contains(&v.as_str()) {
                     bail!(
-                        "dashboard {:?}, panel {:?}, query {}: unknown variable ${v} (known: ${}{}); \
+                        "dashboard {id:?}, panel {:?}, query {}: unknown variable ${v} (known: {}); \
                          define it under the dashboard's `variables`",
-                        d.id,
                         p.name,
                         i + 1,
-                        VARS.join(", $"),
-                        own()
+                        list(&known)
                     );
                 }
             }
@@ -414,7 +558,8 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
                 id: key.clone(),
                 title: e.title.unwrap_or_else(|| key.clone()),
                 kind,
-                variables: Default::default(),
+                variables: Vec::new(),
+                server_picker: true,
                 discover: e
                     .discover
                     .unwrap_or_else(|| default_discover(kind).to_owned()),
@@ -425,28 +570,38 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
     };
     let d = &mut cat.dashboards[idx];
     for (name, value) in e.variables.map(VarsDef::pairs).unwrap_or_default() {
-        if !valid_var_name(&name) || name.starts_with("__") || VARS.contains(&name.as_str()) {
-            bail!(
-                "{at}: variable {name:?} must be a name (letters, digits, '_') that isn't built in (${})",
-                VARS.join(", $")
-            );
+        let Some(name) = name.as_str().map(str::to_owned) else {
+            bail!("{at}: variable names must be text");
+        };
+        if !valid_var_name(&name) || name.starts_with("__") {
+            bail!("{at}: variable {name:?} must be a name (letters, digits, '_')");
         }
-        let value = match value {
+        let raw = match value {
             serde_yaml::Value::String(s) => s,
             serde_yaml::Value::Number(n) => n.to_string(),
             serde_yaml::Value::Bool(b) => b.to_string(),
             _ => bail!("{at}: variable {name:?} must be a string, a number or true / false"),
         };
-        if value.contains('\n') {
+        if raw.contains('\n') {
             bail!("{at}: variable {name:?} must be one line");
         }
-        match d.variables.get(&name) {
-            Some(old) if *old != value => {
-                bail!("{at}: variable {name:?} is {value:?} here but {old:?} in an earlier entry")
-            }
-            _ => {
-                d.variables.insert(name, value);
-            }
+        let value = match parse_label_values(&raw) {
+            Some(Ok(v)) => v,
+            Some(Err(e)) => bail!("{at}: variable {name:?}: {e}"),
+            None => VarValue::Constant(raw.clone()),
+        };
+        match d.variables.iter().find(|v| v.name == name) {
+            Some(old) if old.raw != raw => bail!(
+                "{at}: variable {name:?} is {raw:?} here but {:?} in an earlier entry",
+                old.raw
+            ),
+            Some(_) => {}
+            None => d.variables.push(Variable {
+                query: matches!(value, VarValue::LabelValues { .. }),
+                name,
+                value,
+                raw,
+            }),
         }
     }
     for p in e.panels {
@@ -794,8 +949,11 @@ mod tests {
         ])
         .unwrap();
         let d = c.find("cloud.*").unwrap();
-        assert_eq!(d.variables["monitor"], "cloud-infras");
-        assert_eq!(d.variables["db"], "public-infras");
+        let consts: Vec<_> = d.constants().collect();
+        assert_eq!(
+            consts,
+            [("monitor", "cloud-infras"), ("db", "public-infras")]
+        );
 
         let undefined = r#"
 - dashboard: cloud.*
@@ -817,6 +975,95 @@ mod tests {
                 .contains("earlier entry")
         );
         assert!(one("- dashboard: x\n  variables: [{a: [1]}]\n").is_err());
+    }
+
+    #[test]
+    fn query_variables() {
+        let c = one(
+            r#"
+- dashboard: physical.*
+  variables:
+    - zone: nova
+    - availability_zone: label_values(openstack_compute_node_usage_cpu_allocation_ratio, availability_zone)
+    - compute: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone"},hostname)
+    - compute_node_id: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone", hostname="$compute"},compute_node_id)
+    - all_zones: label_values(availability_zone)
+  panels:
+    - name: cpu
+      queries: [{query: 'x{compute_node_id="$compute_node_id",az="$zone"}'}]
+"#,
+        )
+        .unwrap();
+        let d = &c.dashboards[0];
+        assert!(
+            !d.server_picker,
+            "compute_node_id is a variable: no server picker"
+        );
+        let q: Vec<_> = d
+            .variables
+            .iter()
+            .filter(|v| v.query)
+            .map(|v| v.name.as_str())
+            .collect();
+        assert_eq!(
+            q,
+            [
+                "availability_zone",
+                "compute",
+                "compute_node_id",
+                "all_zones"
+            ]
+        );
+        assert_eq!(
+            d.var("compute_node_id").unwrap().value,
+            VarValue::LabelValues {
+                selector: Some(r#"openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone", hostname="$compute"}"#.into()),
+                label: "compute_node_id".into(),
+            }
+        );
+        assert_eq!(
+            d.var("all_zones").unwrap().value,
+            VarValue::LabelValues {
+                selector: None,
+                label: "availability_zone".into()
+            }
+        );
+
+        // A query variable may only use the ones before it.
+        let later = r#"
+- dashboard: physical.*
+  variables:
+    - compute_node_id: label_values(x{hostname="$compute"}, compute_node_id)
+    - compute: label_values(x, hostname)
+  panels: [{name: a, queries: [{query: 'y{compute_node_id="$compute_node_id"}'}]}]
+"#;
+        assert!(
+            one(later)
+                .unwrap_err()
+                .to_string()
+                .contains("not defined before it")
+        );
+        // Instance dashboards: project_id stays built in, query variables must filter on it.
+        let unscoped = r#"
+- dashboard: cloud.*
+  variables: [{flavor: 'label_values(libvirt_cpu_number, flavor)'}]
+  panels: [{name: a, queries: [{query: 'y{project_id="$project_id",f="$flavor"}'}]}]
+"#;
+        assert!(
+            one(unscoped)
+                .unwrap_err()
+                .to_string()
+                .contains("project_id")
+        );
+        let scoped = r#"
+- dashboard: cloud.*
+  variables: [{flavor: 'label_values(libvirt_cpu_number{project_id=~"$project_id"}, flavor)'}]
+  panels: [{name: a, queries: [{query: 'y{project_id="$project_id",f="$flavor"}'}]}]
+"#;
+        assert!(one(scoped).unwrap().dashboards[0].server_picker);
+        let own_host = "- dashboard: cloud.*\n  variables: [{hostname: a}]\n  panels: [{name: a, queries: [{query: 'y{project_id=\"$project_id\"}'}]}]\n";
+        assert!(one(own_host).is_err());
+        assert!(one("- dashboard: x\n  variables: [{a: 'label_values(x, \"bad\")'}]\n").is_err());
     }
 
     #[test]

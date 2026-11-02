@@ -2,7 +2,7 @@
 import { ErrorNotice, Field, Mono, PageHeader, Picker, tr } from "@rassvet/sdk";
 import { type HostItem, useDashboards, useInfo, useTargets } from "./api";
 import { useParamSetter } from "./Instances";
-import { DashboardPicker, PanelGrid, RangeBar, useNow } from "./Panels";
+import { DashboardPicker, PanelGrid, RangeBar, VariableBar, pickedVars, useDashboardVars, useNow } from "./Panels";
 import { formatSpec, parseRange, resolve } from "./range";
 
 export default function Hosts() {
@@ -25,7 +25,8 @@ function HostsPage({ maxDays }: { maxDays: number }) {
   const dashboards = useDashboards("physical");
   const list = dashboards.data ?? [];
   const dash = list.find((d) => d.id === params.get("dashboard")) ?? list[0];
-  const targets = useTargets(dash?.id, range);
+  // No server list when the dashboard picks servers with its own variables.
+  const targets = useTargets(dash?.server_picker === false ? undefined : dash?.id, range);
   const hosts: HostItem[] = targets.data?.kind === "physical" ? targets.data.hosts : [];
   const hostId = params.get("host") ?? "";
   const host = hosts.find((h) => hostKey(h) === hostId);
@@ -33,6 +34,11 @@ function HostsPage({ maxDays }: { maxDays: number }) {
 
   const target = dash?.panels.filter((p) => p.scope === "target") ?? [];
   const overview = dash?.panels.filter((p) => p.scope === "overview") ?? [];
+  // A dashboard defining compute_node_id / hostname as variables picks servers with them.
+  const picker = dash?.server_picker ?? true;
+  const hostTarget = host ? { compute_node_id: host.compute_node_id || undefined, hostname: host.hostname || undefined } : {};
+  const dv = useDashboardVars(dash, params, picker ? hostTarget : {}, range);
+  const clearVars = Object.fromEntries(Object.keys(pickedVars(params)).map((k) => [`var-${k}`, null]));
 
   return (
     <>
@@ -41,7 +47,8 @@ function HostsPage({ maxDays }: { maxDays: number }) {
         description={tr("Dashboards of the physical servers, from the cloud's Prometheus. Pick a server, or see the whole fleet.")}
       />
       <div className="mb-5 flex flex-wrap items-end gap-3">
-        <DashboardPicker list={list} value={dash?.id ?? ""} onChange={(v) => set({ dashboard: v, host: null })} />
+        <DashboardPicker list={list} value={dash?.id ?? ""} onChange={(v) => set({ dashboard: v, host: null, ...clearVars })} />
+        {picker && (
         <Field label={tr("Physical server")}>
           {(id) => (
             <Picker
@@ -65,11 +72,19 @@ function HostsPage({ maxDays }: { maxDays: number }) {
             />
           )}
         </Field>
+        )}
+        <VariableBar resolved={dv.resolved} loading={dv.loading} onChange={(name, v) => set({ [`var-${name}`]: v })} />
         <RangeBar spec={spec} maxDays={maxDays} onChange={(s) => set({ range: formatSpec(s) })} onRefresh={refresh} />
       </div>
-      {(dashboards.error || targets.error) && <ErrorNotice error={dashboards.error ?? targets.error} className="mb-4" />}
+      {(dashboards.error || targets.error || dv.error) && (
+        <ErrorNotice error={dashboards.error ?? targets.error ?? dv.error} className="mb-4" />
+      )}
       {!dash ? (
         dashboards.data && <p className="text-sm text-muted">{tr("No physical server dashboard is defined in the panel files.")}</p>
+      ) : !dv.vars ? (
+        !dv.error && <p className="text-sm text-muted">{tr("Loading…")}</p>
+      ) : !picker ? (
+        <PanelGrid dashboard={dash.id} panels={dash.panels} target={{ vars: dv.vars }} range={range} />
       ) : hostId ? (
         host ? (
           <>
@@ -77,7 +92,7 @@ function HostsPage({ maxDays }: { maxDays: number }) {
             <PanelGrid
               dashboard={dash.id}
               panels={target}
-              target={{ compute_node_id: host.compute_node_id || undefined, hostname: host.hostname || undefined }}
+              target={{ ...hostTarget, vars: dv.vars }}
               range={range}
             />
           </>
@@ -85,7 +100,7 @@ function HostsPage({ maxDays }: { maxDays: number }) {
           targets.data && <p className="text-sm text-muted">{tr("This server has no metrics in this time range.")}</p>
         )
       ) : overview.length ? (
-        <PanelGrid dashboard={dash.id} panels={overview} target={{}} range={range} />
+        <PanelGrid dashboard={dash.id} panels={overview} target={{ vars: dv.vars }} range={range} />
       ) : (
         <p className="text-sm text-muted">{tr("Choose a physical server.")}</p>
       )}

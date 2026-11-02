@@ -99,7 +99,7 @@ merged into one page, so you can keep the defaults in one file and add panels in
 | `dashboard` | Required. Entries with the same value make one page |
 | `title` | Name shown in the dashboard picker. Defaults to the key |
 | `kind` | `instance` (Instance monitors, every user) or `physical` (Physical server monitors, admins only). Defaults to `physical` when the key starts with `physical`, otherwise `instance` |
-| `variables` | The dashboard's own variables, used as `$name` in its queries and `discover` (see below) |
+| `variables` | The dashboard's own variables, used as `$name` in its queries: constants, or query variables picked in a dropdown (`label_values(...)`, see below) |
 | `discover` | Series selector that lists what can be picked (see below) |
 | `panels` | The panels, in display order |
 
@@ -161,12 +161,81 @@ Write variables as `$name` or `${name}`. Rassvet escapes their values for a doub
 
 A variable applies to its dashboard only: entries with the same `dashboard` key share them, so they can
 be set in one file and used in another. Defining the same variable twice with different values is an
-error. The built-in names above can't be redefined, so `$project_id` always stays the user's project. A
-query using a variable that isn't defined is refused when the files are loaded.
+error. `project_id`, `guest_id`, `region` and the `__` names can't be redefined, so `$project_id` always
+stays the user's project. A query using a variable that isn't defined is refused when the files are loaded.
 
 **Where a panel appears.** Panels that use `$guest_id` (instance) or `$compute_node_id` / `$hostname`
 (physical) are shown when an instance or server is picked. The other panels form the overview: the
 project's (instance dashboards) or the whole fleet's (physical dashboards).
+
+### Query variables: `label_values`
+
+A variable whose value is a `label_values(...)` call, as in Grafana, is a **query variable**: Rassvet
+lists its values from Prometheus and shows it as a dropdown above the panels. Queries use the picked
+value like any other variable.
+
+| Form | Values |
+|------|--------|
+| `label_values(<selector>, <label>)` | The values of `<label>` on the series matching `<selector>` in the time range |
+| `label_values(<label>)` | Every value of `<label>` in the time range (physical dashboards only) |
+
+A query variable's selector can use the variables defined **before** it, so variables can narrow each
+other down. For example, to pick compute nodes by availability zone:
+
+```yaml
+- dashboard: physical-nova
+  title: Compute nodes by zone
+  variables:
+    - availability_zone: label_values(openstack_compute_node_usage_cpu_allocation_ratio, availability_zone)
+    - compute: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone"},hostname)
+    - compute_node_id: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone", hostname="$compute"},compute_node_id)
+  panels:
+    - name: vcpus
+      title: Nova vCPUs
+      queries:
+        - query: max(openstack_compute_node_usage_vcpus_used{compute_node_id="$compute_node_id"})
+          legend: used
+        - query: max(openstack_compute_node_usage_vcpus_total{compute_node_id="$compute_node_id"})
+          legend: total
+    - name: ratio
+      title: CPU allocation ratio
+      queries:
+        - query: max(openstack_compute_node_usage_cpu_allocation_ratio{hostname="$compute"})
+          type: stat
+```
+
+The page then has three dropdowns, **availability_zone**, **compute** and **compute_node_id**, and the
+panels can use `$availability_zone`, `$compute` or `$compute_node_id`. Rassvet resolves the variables in
+order, filling each selector with the values picked before it. With `availability_zone` = `az1` and
+`compute` = `node1`, the values of `compute_node_id` come from:
+
+```
+openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="az1", hostname="node1"}
+```
+
+How values are picked:
+
+- The picked values are kept in the page's address as `var-<name>=<value>` (as in Grafana), so a link
+  opens the same selection.
+- When a picked value isn't among a variable's values (for example after picking another zone), the first
+  value is used. A variable without values is empty.
+- Changing a variable lists the values of the variables after it again.
+- Only one value can be picked per variable; there's no *All* option.
+
+Rules:
+
+- Order matters: write `variables` as a list when they depend on each other. A query variable may use the
+  constant variables, `$region`, the query variables before it and, in instance dashboards,
+  `$project_id`; a variable used before it's defined is refused when the files are loaded.
+- **Instance dashboards:** the selector must match `project_id=~"$project_id"`. As in `discover`,
+  `$project_id` is a regular expression here: the user's project, or for admins the picked project (`.+`
+  for all projects). Project users only ever see their own project's values. `label_values(<label>)`
+  without a selector isn't allowed.
+- **Physical dashboards** may define `compute_node_id` and `hostname` themselves, as in the example.
+  The dashboard then has no **Physical server** picker: its variables pick the server, and all its panels
+  are shown at once. Without them, the server picker fills `$compute_node_id` and `$hostname`, and query
+  variables may use those.
+- A query variable lists at most 5000 values.
 
 ### What can be picked: `discover`
 
@@ -186,7 +255,7 @@ Rassvet reads `guest_id`, `guest_name`, `project_id` and `project_name` from ins
 `project_id=~"$project_id"`. Project users only ever get their own project's instances, whatever the
 selector returns.
 
-`discover` may use `$project_id`, `$region` and the dashboard's own variables. The default selectors match
+`discover` may use `$project_id`, `$region` and the dashboard's constant variables (not query variables). The default selectors match
 every series of every instance. On a large cloud, a single metric is much cheaper, for example:
 
 ```yaml

@@ -187,7 +187,8 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *D
   per-project DNS quotas, TSIG keys, pools and the state of the Designate services.
 - Monitoring (Monitors extension): dashboards of any project's instances (pick a project, then an instance) and of
   the physical servers (per server or the whole fleet), up to a year back. Dashboards and panels are PromQL
-  templates in YAML files (`monitor_panels_paths`), reloaded when they change.
+  templates in YAML files (`monitor_panels_paths`), reloaded when they change, with constant and chained
+  `label_values` variables picked in dropdowns.
 - Federation (SSO): identity providers (remote IDs, domain, authorization TTL) and their protocols (openid,
   saml2, mapped, x509), mappings edited as JSON with templates and validation, Keystone-to-Keystone service
   providers. Rassvet manages federation; signing in to Rassvet itself through SSO is not built yet.

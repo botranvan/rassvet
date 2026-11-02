@@ -190,6 +190,20 @@ impl Prometheus {
         }
     }
 
+    /// The values of `label` between `start` and `end` (`/api/v1/label/<label>/values`).
+    pub async fn label_values(
+        &self,
+        label: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<String>, ApiError> {
+        self.get(
+            &format!("api/v1/label/{label}/values"),
+            &[("start", start.to_string()), ("end", end.to_string())],
+        )
+        .await
+    }
+
     /// Label sets of the series matching any of `matchers` between `start` and `end`.
     pub async fn series(
         &self,

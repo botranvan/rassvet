@@ -351,3 +351,149 @@ async fn custom_panel_files() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+fn series_of(labels: &[(&str, &str)]) -> Value {
+    json!({"status": "success", "data": labels.iter().map(|(k, v)| json!({k.to_string(): v})).collect::<Vec<_>>()})
+}
+
+#[tokio::test]
+async fn chained_query_variables() {
+    let dir = std::env::temp_dir().join(format!("rassvet-monitors-vars-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("compute.yaml"),
+        r#"
+- dashboard: physical-nova
+  variables:
+    - availability_zone: label_values(availability_zone)
+    - compute: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone"},hostname)
+    - compute_node_id: label_values(openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="$availability_zone", hostname="$compute"},compute_node_id)
+  panels:
+    - name: ratio
+      queries:
+        - query: 'max(openstack_compute_node_usage_cpu_allocation_ratio{compute_node_id="$compute_node_id"})'
+          type: stat
+"#,
+    )
+    .unwrap();
+    let prom = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/label/availability_zone/values"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"status": "success", "data": ["az1", "az2"]})),
+        )
+        .mount(&prom)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .and(query_param(
+            "match[]",
+            r#"openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="az2"}"#,
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(series_of(&[("hostname", "node2"), ("hostname", "node1")])),
+        )
+        .mount(&prom)
+        .await;
+    // $compute is filled with the picked host when compute_node_id is resolved.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .and(query_param(
+            "match[]",
+            r#"openstack_compute_node_usage_cpu_allocation_ratio{availability_zone="az2", hostname="node1"}"#,
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(series_of(&[("compute_node_id", "uuid-1")])))
+        .mount(&prom)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/query"))
+        .and(query_param(
+            "query",
+            r#"max(openstack_compute_node_usage_cpu_allocation_ratio{compute_node_id="uuid-1"})"#,
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {"resultType": "vector", "result": [{"metric": {}, "value": [1.0, "16"]}]},
+        })))
+        .expect(1)
+        .mount(&prom)
+        .await;
+    let base = serve_with(
+        &prom,
+        true,
+        &format!("monitor_panels_paths = \"{}\"", dir.display()),
+    )
+    .await;
+
+    let (_, list) = get(format!("{base}/dashboards?kind=physical")).await;
+    assert_eq!(list[0]["server_picker"], false);
+
+    // A value that isn't listed (node9) falls back to the first one.
+    let (status, got) = get(format!(
+        "{base}/variables?dashboard=physical-nova&var-availability_zone=az2&var-compute=node9"
+    ))
+    .await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(got[1]["values"], json!(["node1", "node2"]));
+    assert_eq!(got[1]["value"], "node1");
+    assert_eq!(
+        got[2],
+        json!({"name": "compute_node_id", "values": ["uuid-1"], "value": "uuid-1"})
+    );
+
+    let (status, got) = get(format!(
+        "{base}/query?dashboard=physical-nova&panel=ratio&var-availability_zone=az2&var-compute=node1&var-compute_node_id=uuid-1"
+    ))
+    .await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(
+        got["results"][0]["series"][0]["values"],
+        json!([[1.0, 16.0]])
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn instance_variables_stay_in_the_project() {
+    let dir = std::env::temp_dir().join(format!("rassvet-monitors-ivars-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("i.yaml"),
+        r#"
+- dashboard: cloud.*
+  variables:
+    - instance: label_values(libvirt_cpu_number{project_id=~"$project_id"}, guest_name)
+  panels:
+    - name: n
+      queries: [{query: 'max(libvirt_cpu_number{project_id="$project_id",guest_name="$instance"})', type: stat}]
+"#,
+    )
+    .unwrap();
+    let prom = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .and(query_param(
+            "match[]",
+            r#"libvirt_cpu_number{project_id=~"p1"}"#,
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(series_of(&[("guest_name", "web")])))
+        .expect(1)
+        .mount(&prom)
+        .await;
+    let base = serve_with(
+        &prom,
+        false,
+        &format!("monitor_panels_paths = \"{}\"", dir.display()),
+    )
+    .await;
+    // A project user asking for another project still gets their own.
+    let (status, got) = get(format!(
+        "{base}/variables?dashboard=cloud.%2A&project_id=p2"
+    ))
+    .await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(got[0]["values"], json!(["web"]));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

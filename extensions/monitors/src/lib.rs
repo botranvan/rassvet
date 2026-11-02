@@ -16,7 +16,7 @@
 //!   back `admin_max_range_days` (365).
 //!
 //! Routes under `/api/ext/monitors`: `info`, `dashboards?kind=`, `targets?dashboard=`,
-//! `query?dashboard=&panel=&…`.
+//! `variables?dashboard=&var-<name>=…`, `query?dashboard=&panel=&var-<name>=…&…`.
 
 pub mod dashboards;
 mod prom;
@@ -149,6 +149,7 @@ impl Extension for Monitors {
             .route("/info", get(info))
             .route("/dashboards", get(list_dashboards))
             .route("/targets", get(targets))
+            .route("/variables", get(variables))
             .route("/query", get(query))
             .layer(Ext(self.clouds.clone()))
     }
@@ -460,12 +461,114 @@ struct OutQuery {
     series: Vec<OutSeries>,
 }
 
-/// The dashboard's own `variables` (their names never clash with the built-in ones).
+/// The dashboard's constant `variables` (their names never clash with the built-in ones).
 fn own_vars(d: &Dashboard) -> HashMap<&str, String> {
-    d.variables
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.clone()))
-        .collect()
+    d.constants().map(|(k, v)| (k, v.to_owned())).collect()
+}
+
+/// Longest value accepted for a query variable.
+const MAX_VAR_VALUE: usize = 256;
+/// Most values listed for a query variable.
+const MAX_VAR_VALUES: usize = 5000;
+
+/// The value picked for a query variable (`var-<name>`), if usable.
+fn picked<'q>(params: &'q HashMap<String, String>, name: &str) -> Option<&'q str> {
+    params
+        .get(&format!("var-{name}"))
+        .map(String::as_str)
+        .filter(|v| !v.is_empty() && v.len() <= MAX_VAR_VALUE && !v.chars().any(char::is_control))
+}
+
+#[derive(Serialize)]
+struct ResolvedVar {
+    name: String,
+    values: Vec<String>,
+    /// The picked value when it is one of `values`, otherwise the first value (or empty).
+    value: String,
+}
+
+/// Resolve the query variables of `d` in order: each one's selector is filled with the
+/// constants, the built-ins and the values of the variables before it, and its value is the
+/// picked one if listed, else the first. E.g. with `$compute` = node1, `compute_node_id` =
+/// `label_values(x{hostname="$compute"}, compute_node_id)` lists x{hostname="node1"}'s ids.
+async fn resolve_vars(
+    a: &Access,
+    d: &Dashboard,
+    params: &HashMap<String, String>,
+    w: &Window,
+) -> Result<Vec<ResolvedVar>, ApiError> {
+    let mut vars: HashMap<&str, String> = own_vars(d);
+    vars.insert("region", a.region.clone());
+    match d.kind {
+        // In variable selectors $project_id is a regex: the project, or any for admins.
+        Kind::Instance => {
+            let p = a.project(params.get("project_id").map(String::as_str))?;
+            vars.insert("project_id", p.unwrap_or_else(|| ".+".into()));
+        }
+        Kind::Physical => {
+            for name in ["compute_node_id", "hostname"] {
+                if d.var(name).is_none()
+                    && let Some(v) = params.get(name).filter(|v| !v.is_empty())
+                {
+                    vars.insert(name, id_param(v)?);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for v in d.variables.iter().filter(|v| v.query) {
+        let dashboards::VarValue::LabelValues { selector, label } = &v.value else {
+            continue;
+        };
+        let mut values: Vec<String> = match selector {
+            Some(sel) => {
+                let sel = dashboards::render(sel, &vars);
+                let found = a.cloud.prom.series(&[sel], w.start, w.end).await?;
+                let set: BTreeSet<String> = found
+                    .into_iter()
+                    .filter_map(|mut l| l.remove(label))
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                set.into_iter().collect()
+            }
+            None => a.cloud.prom.label_values(label, w.start, w.end).await?,
+        };
+        values.truncate(MAX_VAR_VALUES);
+        let value = picked(params, &v.name)
+            .filter(|p| values.iter().any(|x| x == p))
+            .map(str::to_owned)
+            .or_else(|| values.first().cloned())
+            .unwrap_or_default();
+        vars.insert(v.name.as_str(), value.clone());
+        out.push(ResolvedVar {
+            name: v.name.clone(),
+            values,
+            value,
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+struct VariablesQuery {
+    dashboard: String,
+    start: Option<i64>,
+    end: Option<i64>,
+}
+
+/// The values of a dashboard's query variables, resolved in order from the picked ones
+/// (`var-<name>=…`), and `project_id` / `compute_node_id` / `hostname` when picked.
+async fn variables(
+    Ext(clouds): Ext<Clouds>,
+    ctx: RequestContext,
+    Query(q): Query<VariablesQuery>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Vec<ResolvedVar>>, ApiError> {
+    let a = Access::new(&clouds, &ctx)?;
+    let cat = a.cloud.panels.get();
+    let d = a.dashboard(&cat, &q.dashboard)?;
+    let w = window(now(), q.start, q.end, a.max_range_days())?;
+    Ok(Json(resolve_vars(&a, d, &params, &w).await?))
 }
 
 /// The variables of one panel request.
@@ -474,6 +577,7 @@ fn panel_vars<'a>(
     d: &'a Dashboard,
     p: &Panel,
     q: &PanelQuery,
+    params: &HashMap<String, String>,
     w: &Window,
 ) -> Result<HashMap<&'a str, String>, ApiError> {
     let needs = |v: &str| p.vars.contains(v);
@@ -484,6 +588,13 @@ fn panel_vars<'a>(
             .and_then(id_param)
     };
     let mut vars = own_vars(d);
+    // Query variables: the values picked in the UI (resolved by the `variables` route).
+    for v in d.variables.iter().filter(|v| v.query) {
+        vars.insert(
+            v.name.as_str(),
+            picked(params, &v.name).unwrap_or_default().to_owned(),
+        );
+    }
     vars.extend([
         ("region", a.region.clone()),
         ("__interval", format!("{}s", w.step)),
@@ -507,14 +618,15 @@ fn panel_vars<'a>(
                 vars.insert("guest_id", required(&q.guest_id, "guest_id")?);
             }
         }
+        // Unless the dashboard defines them as variables (no server picker then).
         Kind::Physical => {
-            if needs("compute_node_id") {
+            if needs("compute_node_id") && d.var("compute_node_id").is_none() {
                 vars.insert(
                     "compute_node_id",
                     required(&q.compute_node_id, "compute_node_id")?,
                 );
             }
-            if needs("hostname") {
+            if needs("hostname") && d.var("hostname").is_none() {
                 vars.insert("hostname", required(&q.hostname, "hostname")?);
             }
         }
@@ -579,6 +691,7 @@ async fn query(
     Ext(clouds): Ext<Clouds>,
     ctx: RequestContext,
     Query(q): Query<PanelQuery>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     let a = Access::new(&clouds, &ctx)?;
     let cat = a.cloud.panels.get();
@@ -590,7 +703,7 @@ async fn query(
         )
     })?;
     let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let vars = panel_vars(&a, d, p, &q, &w)?;
+    let vars = panel_vars(&a, d, p, &q, &params, &w)?;
     let at = w.end.min(now());
 
     let mut results = Vec::new();

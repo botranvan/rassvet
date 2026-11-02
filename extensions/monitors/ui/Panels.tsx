@@ -1,7 +1,18 @@
 /** The panel grid of a dashboard for one target (or the overview) and the time range bar. */
 import { useEffect, useState } from "react";
 import { Button, Card, ErrorNotice, Field, Icon, Input, Picker, cn, tr } from "@rassvet/sdk";
-import { type ChartType, type Dashboard, type Panel, type Range, type Series, type Target, type Unit, usePanelData } from "./api";
+import {
+  type ChartType,
+  type Dashboard,
+  type Panel,
+  type Range,
+  type ResolvedVar,
+  type Series,
+  type Target,
+  type Unit,
+  usePanelData,
+  useVariables,
+} from "./api";
 import { Chart } from "./Chart";
 import { type RangeSpec, formatSpec, fromLocalInput, presetsFor, toLocalInput } from "./range";
 import { Gauges, Pie, Stats } from "./Viz";
@@ -106,6 +117,59 @@ function PanelCard({ dashboard, panel, target, range }: { dashboard: string; pan
         </div>
       )}
     </Card>
+  );
+}
+
+/** `var-<name>` URL parameters → `{name: value}`. */
+export function pickedVars(params: URLSearchParams) {
+  const out: Record<string, string> = {};
+  params.forEach((v, k) => {
+    if (k.startsWith("var-") && v) out[k.slice(4)] = v;
+  });
+  return out;
+}
+
+/**
+ * The dashboard's query variables, resolved from the picked values in the URL. `vars` is
+ * undefined while they load (panels wait for them), `{}` when there are none.
+ */
+export function useDashboardVars(dash: Dashboard | undefined, params: URLSearchParams, target: Target, range: Range) {
+  const picked = pickedVars(params);
+  const q = useVariables(dash, picked, target, range);
+  const hasVars = !!dash?.variables.some((v) => v.query);
+  const vars = !hasVars ? {} : q.data ? Object.fromEntries(q.data.map((v) => [v.name, v.value])) : undefined;
+  return { resolved: q.data ?? [], vars, error: q.error, loading: q.isLoading };
+}
+
+/** One dropdown per query variable, like Grafana's template variables. */
+export function VariableBar({
+  resolved,
+  loading,
+  onChange,
+}: {
+  resolved: ResolvedVar[];
+  loading: boolean;
+  onChange: (name: string, value: string) => void;
+}) {
+  return (
+    <>
+      {resolved.map((v) => (
+        <Field key={v.name} label={v.name}>
+          {(id) => (
+            <Picker
+              id={id}
+              className="w-56"
+              value={v.value}
+              onChange={(x) => onChange(v.name, x)}
+              loading={loading}
+              searchable
+              emptyText={tr("No values in this time range")}
+              options={v.values.map((x) => ({ value: x, label: x }))}
+            />
+          )}
+        </Field>
+      ))}
+    </>
   );
 }
 

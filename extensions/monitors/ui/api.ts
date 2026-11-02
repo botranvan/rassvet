@@ -46,7 +46,18 @@ export interface Dashboard {
   id: string;
   title: string;
   kind: Kind;
+  /** The dashboard's variables; `query` ones (label_values) are picked on the page. */
+  variables: { name: string; query: boolean }[];
+  /** Show Rassvet's instance / server picker; off when the dashboard picks servers with its own variables. */
+  server_picker: boolean;
   panels: Panel[];
+}
+
+/** A query variable resolved by the server: its values and the one in use. */
+export interface ResolvedVar {
+  name: string;
+  values: string[];
+  value: string;
 }
 
 export interface GuestItem {
@@ -122,12 +133,46 @@ export interface Target {
   guest_id?: string;
   compute_node_id?: string;
   hostname?: string;
+  /** Values of the dashboard's query variables. */
+  vars?: Record<string, string>;
 }
+
+/** `{a: "1"}` → `{"var-a": "1"}` */
+const varParams = (vars: Record<string, string> | undefined) =>
+  Object.fromEntries(Object.entries(vars ?? {}).map(([k, v]) => [`var-${k}`, v]));
+
+/**
+ * Resolve the dashboard's query variables from the picked values (`picked`, by name): the
+ * server lists each one's values in order, keeping a picked value when it is listed.
+ */
+export const useVariables = (dashboard: Dashboard | undefined, picked: Record<string, string>, target: Target, range: Range) => {
+  const enabled = !!dashboard && dashboard.variables.some((v) => v.query);
+  return useQuery({
+    queryKey: ["monitors", "variables", dashboard?.id, picked, target, listKey(range)],
+    queryFn: () =>
+      api.get<ResolvedVar[]>(
+        `${BASE}/variables?${qs({
+          dashboard: dashboard!.id,
+          project_id: target.project_id,
+          compute_node_id: target.compute_node_id,
+          hostname: target.hostname,
+          ...varParams(picked),
+          ...range,
+        })}`,
+      ),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+    enabled,
+  });
+};
 
 export const usePanelData = (dashboard: string, panel: string, target: Target, range: Range) =>
   useQuery({
     queryKey: ["monitors", "panel", dashboard, panel, target, range],
-    queryFn: ({ signal }) => api.get<PanelData>(`${BASE}/query?${qs({ dashboard, panel, ...target, ...range })}`, { signal }),
+    queryFn: ({ signal }) => {
+      const { vars, ...rest } = target;
+      return api.get<PanelData>(`${BASE}/query?${qs({ dashboard, panel, ...rest, ...varParams(vars), ...range })}`, { signal });
+    },
     staleTime: 15_000,
     placeholderData: (prev) => prev,
   });

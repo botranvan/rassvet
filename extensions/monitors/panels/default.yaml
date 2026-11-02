@@ -147,7 +147,7 @@
       unit: count
       width: full
       queries:
-        - query: count(count by (guest_id) (libvirt_cpu_number{project_id="$project_id"}))
+        - query: count(count by (guest_id) (libvirt_cpu_time{project_id="$project_id"}))
           type: stat
           legend: running instances
         - query: sum(max by (guest_id) (libvirt_cpu_number{project_id="$project_id"}))
