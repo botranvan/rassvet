@@ -46,6 +46,32 @@ struct MatrixItem {
     values: Vec<(f64, String)>,
 }
 
+/// Largest answer read from Prometheus; a larger one (e.g. a `series` call matching far too
+/// much) is refused rather than held in memory.
+const MAX_BODY: usize = 64 * 1024 * 1024;
+
+async fn read_limited(mut res: reqwest::Response, max: usize) -> Result<Vec<u8>, ApiError> {
+    let too_big = || {
+        tracing::warn!(max, "Prometheus answer too large");
+        upstream("Prometheus answered with too much data; narrow the query or the time range")
+    };
+    if res.content_length().is_some_and(|n| n > max as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
+        .await
+        .map_err(|_| upstream("Prometheus closed the connection"))?
+    {
+        if out.len() + chunk.len() > max {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
 fn none<T>() -> Option<T> {
     None
 }
@@ -95,7 +121,8 @@ impl Prometheus {
             })
         })?;
         let status = res.status();
-        let body: Value = res.json().await.map_err(|_| {
+        let raw = read_limited(res, MAX_BODY).await?;
+        let body: Value = serde_json::from_slice(&raw).map_err(|_| {
             upstream(format!(
                 "Prometheus answered HTTP {status} without a JSON body"
             ))
@@ -104,7 +131,7 @@ impl Prometheus {
             .map_err(|e| upstream(format!("unexpected answer from Prometheus: {e}")))?;
         if env.status != "success" {
             let msg = env.error.unwrap_or_else(|| format!("HTTP {status}"));
-            tracing::warn!(%status, error = msg, "Prometheus refused a query");
+            tracing::warn!(%status, error = msg, query = ?params.first().map(|p| &p.1), "Prometheus refused a query");
             return Err(upstream(format!("Prometheus: {msg}")));
         }
         env.data

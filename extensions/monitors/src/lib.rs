@@ -74,7 +74,7 @@ impl Monitors {
             let cat = panels.get();
             tracing::info!(
                 cloud = id,
-                url = settings.prometheus_url,
+                url = redacted(&settings.prometheus_url),
                 panels = paths
                     .map(|p| p.join(", "))
                     .unwrap_or_else(|| "built-in".into()),
@@ -93,6 +93,19 @@ impl Monitors {
         Ok(Self {
             clouds: Arc::new(map),
         })
+    }
+}
+
+/// A URL for the log, without a password it may carry (`http://user:secret@host`).
+fn redacted(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(mut u) => {
+            if u.password().is_some() {
+                let _ = u.set_password(Some("***"));
+            }
+            u.to_string()
+        }
+        Err(_) => "(invalid URL)".into(),
     }
 }
 
@@ -199,6 +212,19 @@ impl Access {
             admin,
             own_project,
         })
+    }
+
+    /// Prometheus's own error messages can quote a panel's PromQL (with its constants), which
+    /// project users are never sent: they get a general message, the details are logged.
+    fn hide(&self, e: ApiError) -> ApiError {
+        if self.admin || !e.message.starts_with("Prometheus: ") {
+            e
+        } else {
+            err(
+                e.status,
+                "Prometheus could not run this query; the details are in Rassvet's log",
+            )
+        }
     }
 
     fn max_range_days(&self) -> u32 {
@@ -384,7 +410,12 @@ async fn targets(
     vars.insert("region", a.region.clone());
     vars.insert("project_id", project);
     let selector = dashboards::render(&d.discover, &vars);
-    let found = a.cloud.prom.series(&[selector], w.start, w.end).await?;
+    let found = a
+        .cloud
+        .prom
+        .series(&[selector], w.start, w.end)
+        .await
+        .map_err(|e| a.hide(e))?;
 
     let out = match d.kind {
         Kind::Instance => {
@@ -527,7 +558,12 @@ async fn resolve_vars(
         let mut values: Vec<String> = match selector {
             Some(sel) => {
                 let sel = dashboards::render(sel, &vars);
-                let found = a.cloud.prom.series(&[sel], w.start, w.end).await?;
+                let found = a
+                    .cloud
+                    .prom
+                    .series(&[sel], w.start, w.end)
+                    .await
+                    .map_err(|e| a.hide(e))?;
                 let set: BTreeSet<String> = found
                     .into_iter()
                     .filter_map(|mut l| l.remove(label))
@@ -535,7 +571,12 @@ async fn resolve_vars(
                     .collect();
                 set.into_iter().collect()
             }
-            None => a.cloud.prom.label_values(label, w.start, w.end).await?,
+            None => a
+                .cloud
+                .prom
+                .label_values(label, w.start, w.end)
+                .await
+                .map_err(|e| a.hide(e))?,
         };
         values.truncate(MAX_VAR_VALUES);
         let value = picked(params, &v.name)
@@ -716,13 +757,13 @@ async fn query(
     for (i, query) in p.queries.iter().enumerate() {
         let expr = dashboards::render(&query.expr, &vars);
         let mut got = match query.chart {
-            ChartType::TimeSeries => {
-                a.cloud
-                    .prom
-                    .query_range(&expr, w.start, w.end, w.step)
-                    .await?
-            }
-            _ => a.cloud.prom.query(&expr, at).await?,
+            ChartType::TimeSeries => a
+                .cloud
+                .prom
+                .query_range(&expr, w.start, w.end, w.step)
+                .await
+                .map_err(|e| a.hide(e))?,
+            _ => a.cloud.prom.query(&expr, at).await.map_err(|e| a.hide(e))?,
         };
         got.retain(|s| !s.values.is_empty());
         got.sort_by(|x, y| x.labels.cmp(&y.labels));
@@ -839,6 +880,15 @@ mod tests {
             ["write-vda ", "write-vdb "]
         );
         assert_eq!(name_series(None, "CPU", &[s(&[])]), ["CPU"]);
+    }
+
+    #[test]
+    fn redacts_url_passwords() {
+        assert_eq!(
+            redacted("http://u:secret@prom:9090/x"),
+            "http://u:***@prom:9090/x"
+        );
+        assert_eq!(redacted("http://prom:9090"), "http://prom:9090/");
     }
 
     #[test]

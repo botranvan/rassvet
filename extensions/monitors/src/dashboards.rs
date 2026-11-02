@@ -512,11 +512,14 @@ fn check_vars(d: &mut Dashboard) -> anyhow::Result<()> {
                 );
             }
         }
-        if d.kind == Kind::Instance && !used.iter().any(|u| u == "project_id") {
-            bail!(
-                "{at}: in an instance dashboard, the selector must match project_id=~\"$project_id\", \
-                 so project users only get their own project's values"
-            );
+        let query_vars: Vec<&str> = d
+            .variables
+            .iter()
+            .filter(|o| o.query)
+            .map(|o| o.name.as_str())
+            .collect();
+        if let Err(e) = check_promql(sel, d.kind, &query_vars) {
+            bail!("{at}: {e}");
         }
     }
 
@@ -533,8 +536,12 @@ fn check_vars(d: &mut Dashboard) -> anyhow::Result<()> {
 
     let mut known: Vec<&str> = VARS.to_vec();
     known.extend(names(&|_| true));
+    let query_vars = names(&|o: &Variable| o.query);
     for p in &d.panels {
         for (i, q) in p.queries.iter().enumerate() {
+            if let Err(e) = check_promql(&q.expr, d.kind, &query_vars) {
+                bail!("dashboard {id:?}, panel {:?}, query {}: {e}", p.name, i + 1);
+            }
             for v in vars_in(&q.expr) {
                 if !known.contains(&v.as_str()) {
                     bail!(
@@ -721,6 +728,215 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
             max_series: p.max_series.unwrap_or(DEFAULT_MAX_SERIES) as usize,
             vars,
         });
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------- PromQL checks
+
+/// What [`scan_promql`] finds in a query.
+#[derive(Debug, Default)]
+struct PromScan {
+    /// The text between `{` and `}` of each series selector.
+    selectors: Vec<String>,
+    /// Metric names used without `{…}` (e.g. `sum(foo)`).
+    bare_metrics: Vec<String>,
+    /// Each variable used, and whether it is inside a double-quoted string.
+    vars: Vec<(String, bool)>,
+}
+
+const KEYWORDS: &[&str] = &[
+    "by",
+    "without",
+    "on",
+    "ignoring",
+    "group_left",
+    "group_right",
+    "bool",
+    "offset",
+    "and",
+    "or",
+    "unless",
+    "atan2",
+    "inf",
+    "nan",
+];
+/// Keywords followed by a `(label, …)` list.
+const LABEL_LISTS: &[&str] = &[
+    "by",
+    "without",
+    "on",
+    "ignoring",
+    "group_left",
+    "group_right",
+];
+
+/// A light PromQL scanner: enough to find series selectors, bare metric names and where
+/// variables sit, without evaluating anything.
+fn scan_promql(expr: &str) -> PromScan {
+    let c: Vec<char> = expr.chars().collect();
+    let mut out = PromScan::default();
+    let ident = |ch: char| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':';
+    // `$name` / `${name}` at i; returns (name, next index).
+    let var_at = |i: usize| -> Option<(String, usize)> {
+        if c.get(i + 1) == Some(&'{') {
+            let end = (i + 2..c.len()).find(|&j| c[j] == '}')?;
+            Some((c[i + 2..end].iter().collect(), end + 1))
+        } else {
+            let mut j = i + 1;
+            while j < c.len() && (c[j].is_ascii_alphanumeric() || c[j] == '_') {
+                j += 1;
+            }
+            (j > i + 1).then(|| (c[i + 1..j].iter().collect(), j))
+        }
+    };
+    let (mut i, mut block, mut range) = (0, None::<usize>, false);
+    let mut list_depth = 0usize; // inside a `by (…)`-style label list
+    while i < c.len() {
+        let ch = c[i];
+        match ch {
+            '"' | '\'' | '`' => {
+                let mut j = i + 1;
+                while j < c.len() && c[j] != ch {
+                    if c[j] == '\\' && ch != '`' {
+                        j += 1;
+                    } else if c[j] == '$'
+                        && let Some((name, next)) = var_at(j)
+                    {
+                        out.vars.push((name, ch == '"'));
+                        j = next;
+                        continue;
+                    }
+                    j += 1;
+                }
+                i = j + 1;
+            }
+            '$' => match var_at(i) {
+                Some((name, next)) => {
+                    out.vars.push((name, false));
+                    i = next;
+                }
+                None => i += 1,
+            },
+            '{' if block.is_none() => {
+                block = Some(i + 1);
+                i += 1;
+            }
+            '}' if block.is_some() => {
+                out.selectors
+                    .push(c[block.take().unwrap()..i].iter().collect());
+                i += 1;
+            }
+            '[' => {
+                range = true;
+                i += 1;
+            }
+            ']' => {
+                range = false;
+                i += 1;
+            }
+            '(' if list_depth > 0 => {
+                list_depth += 1;
+                i += 1;
+            }
+            ')' if list_depth > 0 => {
+                list_depth -= 1;
+                i += 1;
+            }
+            _ if ch.is_ascii_digit()
+                || (ch == '.' && c.get(i + 1).is_some_and(char::is_ascii_digit)) =>
+            {
+                // Numbers and durations: 1e9, 0.5, 5m, 1e-9.
+                i += 1;
+                while i < c.len()
+                    && (c[i].is_ascii_alphanumeric()
+                        || c[i] == '.'
+                        || ((c[i] == '-' || c[i] == '+') && matches!(c[i - 1], 'e' | 'E')))
+                {
+                    i += 1;
+                }
+            }
+            _ if (ch.is_ascii_alphabetic() || ch == '_')
+                && block.is_none()
+                && !range
+                && list_depth == 0 =>
+            {
+                let start = i;
+                while i < c.len() && ident(c[i]) {
+                    i += 1;
+                }
+                let word: String = c[start..i].iter().collect();
+                let next = c[i..].iter().find(|ch| !ch.is_whitespace()).copied();
+                if KEYWORDS.contains(&word.to_ascii_lowercase().as_str()) {
+                    if LABEL_LISTS.contains(&word.to_ascii_lowercase().as_str())
+                        && next == Some('(')
+                    {
+                        // Skip to the list's `(`; its contents are label names.
+                        while c[i] != '(' {
+                            i += 1;
+                        }
+                        list_depth = 1;
+                        i += 1;
+                    }
+                } else if next != Some('(') && next != Some('{') {
+                    // `sum by (…) (…)`: an aggregation, not a metric.
+                    let rest: String = c[i..]
+                        .iter()
+                        .collect::<String>()
+                        .trim_start()
+                        .to_ascii_lowercase();
+                    let grouped = ["by", "without"].iter().any(|k| {
+                        rest.strip_prefix(k)
+                            .is_some_and(|r| r.trim_start().starts_with('('))
+                    });
+                    if !grouped {
+                        out.bare_metrics.push(word);
+                    }
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// Whether a selector's text has a matcher `project_id="$project_id"` (or `=~`).
+fn has_project_matcher(selector: &str) -> bool {
+    let compact: String = selector.chars().filter(|c| !c.is_whitespace()).collect();
+    ["$project_id", "${project_id}"].iter().any(|v| {
+        compact.contains(&format!("project_id=\"{v}\""))
+            || compact.contains(&format!("project_id=~\"{v}\""))
+    })
+}
+
+/// Check a query (or a query variable's selector) that project users' data depends on:
+/// * query variables (values chosen in the browser) must sit inside double-quoted strings,
+///   where their values are escaped, so they can't change the query;
+/// * in instance dashboards every series selector must match `project_id="$project_id"`
+///   (or `=~`), and no metric may be used without a selector.
+fn check_promql(expr: &str, kind: Kind, query_vars: &[&str]) -> Result<(), String> {
+    let scan = scan_promql(expr);
+    for (name, quoted) in &scan.vars {
+        if !quoted && query_vars.contains(&name.as_str()) {
+            return Err(format!(
+                "${name} is chosen in the page, so it may only be used inside a double-quoted string, e.g. label=\"${name}\""
+            ));
+        }
+    }
+    if kind == Kind::Instance {
+        if let Some(m) = scan.bare_metrics.first() {
+            return Err(format!(
+                "{m} is used without a selector: write {m}{{project_id=\"$project_id\"}} so project users only see their own project"
+            ));
+        }
+        if scan.selectors.is_empty() {
+            return Err("has no series selector with project_id=\"$project_id\"".into());
+        }
+        if let Some(sel) = scan.selectors.iter().find(|s| !has_project_matcher(s)) {
+            return Err(format!(
+                "the selector {{{sel}}} doesn't match project_id=\"$project_id\": every selector of an instance dashboard must, so project users only see their own project"
+            ));
+        }
     }
     Ok(())
 }
@@ -1154,6 +1370,40 @@ mod tests {
         );
         assert!(one("- dashboard: physical-x\n  panels: [{name: a, max_series: 51, queries: [{query: x}]}]").unwrap_err().to_string().contains("max_series"));
         assert!(one("- dashboard: physical-x\n  legend_rows: 0\n  panels: [{name: a, queries: [{query: x}]}]").unwrap_err().to_string().contains("legend_rows"));
+    }
+
+    #[test]
+    fn promql_project_scoping() {
+        let ok = |q: &str| check_promql(q, Kind::Instance, &["v"]);
+        assert!(
+            ok(r#"count(count by (guest_id) (libvirt_cpu_time{project_id="$project_id"}))"#)
+                .is_ok()
+        );
+        assert!(ok(r#"topk(8, 100 * (sum by (guest_name) (rate(a{project_id="$project_id"}[$__rate_interval])) + sum by (guest_name) (rate(b{ project_id =~ "${project_id}" }[5m]))) / 1e9 / max by (guest_name) (c{project_id="$project_id"}))"#).is_ok());
+        assert!(ok(r#"sum(x{project_id="$project_id"}) / on(guest_id) group_left(flavor) y{project_id="$project_id"} offset 5m"#).is_ok());
+        // Leaks other projects' data: refused.
+        for bad in [
+            r#"sum(x{project_id!="$project_id"})"#,
+            r#"x{project_id="$project_id"} + y{}"#,
+            r#"x{project_id="$project_id"} + y{guest_id="a"}"#,
+            r#"x{project_id="$project_id"} or sum(other_metric)"#,
+            r#"vector(1)"#,
+        ] {
+            assert!(ok(bad).is_err(), "{bad}");
+        }
+        // Values chosen in the browser stay inside double quotes.
+        assert!(ok(r#"x{project_id="$project_id",n="$v"}"#).is_ok());
+        for bad in [
+            r#"x{project_id="$project_id",n='$v'}"#,
+            r#"x{project_id="$project_id",n=`$v`}"#,
+            r#"topk($v, x{project_id="$project_id"})"#,
+            r#"x{project_id="$project_id"}[${v}]"#,
+        ] {
+            assert!(ok(bad).is_err(), "{bad}");
+        }
+        // Physical dashboards (admins only) just keep chosen values quoted.
+        assert!(check_promql("sum(foo)", Kind::Physical, &["v"]).is_ok());
+        assert!(check_promql("topk($v, foo)", Kind::Physical, &["v"]).is_err());
     }
 
     #[test]

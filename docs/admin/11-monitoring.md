@@ -22,9 +22,21 @@ monitors** for every project and **Physical server monitors** in the admin view.
 
 Rassvet enforces these rules on the server. The browser never sends PromQL. It picks a dashboard, a panel
 and an instance or server, and Rassvet fills the panel's query. `$project_id` is always the project of the
-user's token, whatever the browser asks for. Every query of an instance dashboard must use `$project_id`,
-and Rassvet refuses a panel file that breaks this rule, so a forgotten filter can't show other projects'
-data. Requests for physical dashboards or for older data are refused.
+user's token, whatever the browser asks for. Requests for physical dashboards or for older data are
+refused.
+
+Panel files are checked when they're loaded, and a file that breaks one of these rules is refused:
+
+- In instance dashboards, **every series selector** of a query (and of a query variable) must match
+  `project_id="$project_id"` or `project_id=~"$project_id"`, and no metric may be used without a selector
+  (`sum(foo)` is refused, `sum(foo{project_id="$project_id"})` is fine). A forgotten or negated filter
+  (`project_id!="$project_id"`) can't show other projects' data.
+- Query variables are chosen in the browser, so they may only be used **inside double-quoted strings**
+  (`label="$name"` or `label=~"$name"`), where their values are escaped. `topk($n, …)`, `'$name'` or
+  `[$name]` are refused.
+
+Prometheus's own error messages can quote a panel's query; project users get a general message instead,
+and the details go to Rassvet's log. Answers larger than 64 MiB are refused.
 
 ## Dashboards and panels
 

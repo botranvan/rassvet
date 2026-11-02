@@ -259,7 +259,7 @@ async fn admin_sees_physical_servers_and_a_year() {
         now - 364 * 86400
     ))
     .await;
-    // The second query of the panel failed: the error of Prometheus is passed on.
+    // The second query of the panel failed: admins get Prometheus's error.
     assert_eq!(status, 502);
     assert_eq!(body["error"]["message"], "Prometheus: boom");
 }
@@ -550,4 +550,37 @@ async fn instance_variables_from_the_picked_instance() {
         400
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn project_users_get_no_prometheus_details_or_huge_answers() {
+    let prom = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/query_range"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "status": "error", "errorType": "bad_data", "error": "parse error near db=\"secret-db\"",
+        })))
+        .mount(&prom)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(" ".repeat(65 * 1024 * 1024)))
+        .mount(&prom)
+        .await;
+    let base = serve(&prom, false).await;
+    let (status, body) = get(format!(
+        "{base}/query?dashboard={CLOUD}&panel=cpu&guest_id=g1"
+    ))
+    .await;
+    assert_eq!(status, 502);
+    let msg = body["error"]["message"].as_str().unwrap();
+    assert!(!msg.contains("secret-db"), "{msg}");
+    let (status, body) = get(format!("{base}/targets?dashboard={CLOUD}")).await;
+    assert_eq!(status, 502);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("too much data")
+    );
 }
