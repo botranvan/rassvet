@@ -16,7 +16,7 @@ panels there are; the ones below are the built-in panels.
    **Dashboard**.
 2. Pick the instance in **Instance**. The list holds every instance of your current project that has
    metrics in the selected time range, including instances deleted during that range.
-3. Pick a **Time range**: a preset from the last hour to the last 60 days, or **Custom range…** with a
+3. Pick a **Time range**: a preset (last 5, 15 or 30 minutes, last 1, 3, 6, 12 or 24 hours, last 2, 7, 30 or 60 days), or **Custom range…** with a
    start and an end (no earlier than 60 days ago). Rassvet refreshes the charts every minute, and **↻**
    refreshes them right away.
 

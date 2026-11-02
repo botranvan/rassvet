@@ -30,7 +30,7 @@ const HEIGHT = 190;
 const M = { top: 10, right: 12, bottom: 22, left: 62 };
 const locale = lang === "vi" ? "vi-VN" : undefined;
 
-const TIME_STEPS = [60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400, 14 * 86400, 30 * 86400];
+const TIME_STEPS = [60, 120, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400, 14 * 86400, 30 * 86400];
 
 function timeTicks(start: number, end: number, width: number) {
   const want = Math.max(2, Math.floor(width / 100));

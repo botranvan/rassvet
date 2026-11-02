@@ -2,6 +2,7 @@
 import { tr } from "@rassvet/sdk";
 import type { Range } from "./api";
 
+const M = 60;
 const H = 3600;
 const D = 86400;
 
@@ -12,10 +13,15 @@ export interface Preset {
 }
 
 export const PRESETS: Preset[] = [
+  { id: "5m", label: tr("Last 5 minutes"), seconds: 5 * M },
+  { id: "15m", label: tr("Last 15 minutes"), seconds: 15 * M },
+  { id: "30m", label: tr("Last 30 minutes"), seconds: 30 * M },
   { id: "1h", label: tr("Last hour"), seconds: H },
+  { id: "3h", label: tr("Last 3 hours"), seconds: 3 * H },
   { id: "6h", label: tr("Last 6 hours"), seconds: 6 * H },
   { id: "12h", label: tr("Last 12 hours"), seconds: 12 * H },
   { id: "24h", label: tr("Last 24 hours"), seconds: D },
+  { id: "2d", label: tr("Last 2 days"), seconds: 2 * D },
   { id: "7d", label: tr("Last 7 days"), seconds: 7 * D },
   { id: "30d", label: tr("Last 30 days"), seconds: 30 * D },
   { id: "60d", label: tr("Last 60 days"), seconds: 60 * D },
@@ -23,6 +29,9 @@ export const PRESETS: Preset[] = [
   { id: "180d", label: tr("Last 180 days"), seconds: 180 * D },
   { id: "365d", label: tr("Last year"), seconds: 365 * D },
 ];
+
+/** The preset used when the URL names none. */
+const DEFAULT_PRESET = "1h";
 
 /** Presets within the session's limit. */
 export const presetsFor = (maxDays: number) => PRESETS.filter((p) => p.seconds <= maxDays * D);
@@ -38,7 +47,10 @@ export function parseRange(v: string | null, maxDays: number): RangeSpec {
     const end = Number(fixed[2]);
     if (start < end) return { start, end };
   }
-  return { preset: presets.find((p) => p.id === v) ?? presets[0] ?? PRESETS[0] };
+  return {
+    preset:
+      presets.find((p) => p.id === v) ?? presets.find((p) => p.id === DEFAULT_PRESET) ?? presets[0] ?? PRESETS[0],
+  };
 }
 
 export const formatSpec = (s: RangeSpec) => ("preset" in s ? s.preset.id : `${s.start}-${s.end}`);

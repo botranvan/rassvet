@@ -4784,6 +4784,11 @@ const vi: Record<string, string> = {
   "Project: {name}": "Dự án: {name}",
   "No physical server dashboard is defined in the panel files.": "Các tệp panel chưa định nghĩa dashboard máy chủ vật lý nào.",
   "Choose an instance to see its own panels.": "Chọn một máy ảo để xem các panel của nó.",
+  "Last 5 minutes": "5 phút qua",
+  "Last 15 minutes": "15 phút qua",
+  "Last 30 minutes": "30 phút qua",
+  "Last 3 hours": "3 giờ qua",
+  "Last 2 days": "2 ngày qua",
 };
 
 export default vi;

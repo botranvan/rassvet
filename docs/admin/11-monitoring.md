@@ -271,4 +271,5 @@ Prometheus is only called by the Rassvet server, so it doesn't have to be reacha
   an instance you see the dashboard's overview panels for the project.
 - **Physical server monitors**: pick a server by host name, or leave it empty for the fleet overview.
 
-Both pages offer time ranges up to a year and a custom from / to.
+Both pages offer presets from the last 5 minutes to the last year (admins also get 90 days, 180 days and a
+year) and a custom from / to.
