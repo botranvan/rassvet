@@ -7,6 +7,10 @@
 //! Extensions are compiled in via Cargo features of the `rassvet` server crate and are
 //! only shown to a user when every service type in [`Manifest::service_types`] has an
 //! endpoint in the selected region of that user's Keystone catalog.
+//!
+//! An extension that needs settings reads them from `[cloud.extensions.<id>]` tables in
+//! `rassvet.toml` (the server hands them to its constructor) and can override
+//! [`Extension::is_available_in`] to show up only in the clouds it is configured for.
 
 use std::sync::Arc;
 
@@ -79,6 +83,14 @@ pub trait Extension: Send + Sync + 'static {
             .service_types
             .iter()
             .all(|s| catalog.has_service(s, region))
+    }
+
+    /// Whether this extension is usable in the configured cloud `cloud_id` (the
+    /// `[[cloud]] id` of rassvet.toml) with the given catalog in `region`. Defaults to
+    /// [`Extension::is_available`]; extensions configured per cloud override it.
+    fn is_available_in(&self, cloud_id: &str, catalog: &Catalog, region: Option<&str>) -> bool {
+        let _ = cloud_id;
+        self.is_available(catalog, region)
     }
 }
 

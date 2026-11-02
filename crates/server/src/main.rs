@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let listen = cfg.server.listen;
     let secure_cookies = cfg.server.secure_cookies;
-    let exts = extensions::registered();
+    let exts = extensions::registered(&cfg)?;
     for e in &exts {
         let m = e.manifest();
         tracing::info!(id = m.id, version = m.version, "extension compiled in");

@@ -846,7 +846,7 @@ async fn nav_items(
     for ext in st
         .extensions
         .iter()
-        .filter(|e| e.is_available(catalog, region))
+        .filter(|e| e.is_available_in(&ctx.cloud_id, catalog, region))
     {
         extensions.push(ext.manifest());
         items.extend(ext.nav().into_iter().filter(|i| allowed(&i.role)));
