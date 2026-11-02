@@ -59,7 +59,8 @@ merged into one page, so you can keep the defaults in one file and add panels in
       unit: percent
       queries:
         - query: >-
-            100 * sum(rate(libvirt_cpu_time{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            100 * (sum(rate(libvirt_cpu_user{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+            + sum(rate(libvirt_cpu_system{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))) / 1e9
             / max(libvirt_cpu_number{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"})
           type: time_series
           legend: CPU

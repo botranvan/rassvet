@@ -20,7 +20,7 @@
 #     panels:
 #       - name: cpu
 #         queries:
-#           - query: 'sum(rate(libvirt_cpu_time{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
+#           - query: 'sum(rate(libvirt_cpu_user{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
 
 # --------------------------------------------------------------------------- instances
 - dashboard: cloud.*
@@ -28,14 +28,26 @@
   kind: instance
   panels:
     # Shown when an instance is picked (the queries use $guest_id).
+    # libvirt_cpu_user / libvirt_cpu_system: CPU time of the instance in nanoseconds (counters);
+    # divided by the vCPUs, 100% means every vCPU busy.
     - name: cpu
       title: CPU usage
+      description: Share of the instance's vCPUs in use
       unit: percent
       queries:
         - query: >-
-            100 * sum(rate(libvirt_cpu_time{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            100 * (sum(rate(libvirt_cpu_user{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+            + sum(rate(libvirt_cpu_system{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))) / 1e9
             / max(libvirt_cpu_number{project_id="$project_id",guest_id="$guest_id"})
-          legend: CPU
+          legend: total
+        - query: >-
+            100 * sum(rate(libvirt_cpu_user{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            / max(libvirt_cpu_number{project_id="$project_id",guest_id="$guest_id"})
+          legend: user
+        - query: >-
+            100 * sum(rate(libvirt_cpu_system{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            / max(libvirt_cpu_number{project_id="$project_id",guest_id="$guest_id"})
+          legend: system
 
     - name: memory_now
       title: Memory in use now
@@ -135,7 +147,7 @@
       unit: count
       width: full
       queries:
-        - query: count(count by (guest_id) (libvirt_cpu_time{project_id="$project_id"}))
+        - query: count(count by (guest_id) (libvirt_cpu_number{project_id="$project_id"}))
           type: stat
           legend: running instances
         - query: sum(max by (guest_id) (libvirt_cpu_number{project_id="$project_id"}))
@@ -151,7 +163,8 @@
       unit: percent
       queries:
         - query: >-
-            topk(8, 100 * sum by (guest_name) (rate(libvirt_cpu_time{project_id="$project_id"}[$__rate_interval])) / 1e9
+            topk(8, 100 * (sum by (guest_name) (rate(libvirt_cpu_user{project_id="$project_id"}[$__rate_interval]))
+            + sum by (guest_name) (rate(libvirt_cpu_system{project_id="$project_id"}[$__rate_interval]))) / 1e9
             / max by (guest_name) (libvirt_cpu_number{project_id="$project_id"}))
           legend: "{{guest_name}}"
 

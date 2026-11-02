@@ -15,7 +15,7 @@
 //!       description: CPU usage
 //!       unit: percent
 //!       queries:
-//!         - query: 'sum(rate(libvirt_cpu_time{db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
+//!         - query: 'sum(rate(libvirt_cpu_user{db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
 //!           type: time_series   # time_series | pie_chart | stat | gauge
 //!           legend: auto        # or a template such as "write {{device}}"
 //!           unit: bytes         # optional, for stat / gauge / pie (default: the panel's)

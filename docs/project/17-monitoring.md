@@ -26,7 +26,7 @@ numbers or gauges) and pie charts; those show the value at the end of the time r
 
 | Chart | What it shows |
 |-------|---------------|
-| CPU usage | Share of the instance's vCPUs in use (100% = all of them busy) |
+| CPU usage | Share of the instance's vCPUs in use (100% = all of them busy), in total and split into user and system time |
 | Memory | Memory used inside the guest, resident memory on the hypervisor, and the flavor's memory |
 | Memory in use now | Memory used as a share of the total, as a gauge |
 | Disk throughput / Disk IOPS | Bytes and requests read and written per second, per disk (`vda`, `vdb`…) |

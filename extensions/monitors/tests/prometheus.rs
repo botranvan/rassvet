@@ -93,9 +93,9 @@ async fn project_user_only_sees_own_project() {
             "status": "success",
             "data": [
                 {"__name__": "libvirt_memory_total", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras", "db": "public-infras"},
-                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras"},
+                {"__name__": "libvirt_cpu_number", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras"},
                 // Never shown to a project user, even if Prometheus returned it.
-                {"__name__": "libvirt_cpu_time", "guest_id": "g2", "guest_name": "other", "project_id": "p2", "project_name": "x", "monitor": "cloud-infras"},
+                {"__name__": "libvirt_cpu_number", "guest_id": "g2", "guest_name": "other", "project_id": "p2", "project_name": "x", "monitor": "cloud-infras"},
             ],
         })))
         .expect(1)
@@ -107,13 +107,15 @@ async fn project_user_only_sees_own_project() {
             "query",
             r#"project_id="p1",guest_id="g1""#,
         ))
+        .and(query_param_contains("query", "libvirt_cpu_"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": {"resultType": "matrix", "result": [
                 {"metric": {}, "values": [[1.0, "12.5"], [16.0, "NaN"]]},
             ]},
         })))
-        .expect(1)
+        // total, user and system
+        .expect(3)
         .mount(&prom)
         .await;
     let base = serve(&prom, false).await;
@@ -136,7 +138,8 @@ async fn project_user_only_sees_own_project() {
         got["results"][0]["series"][0]["values"],
         json!([[1.0, 12.5]])
     );
-    assert_eq!(got["results"][0]["series"][0]["name"], "CPU");
+    assert_eq!(got["results"][0]["series"][0]["name"], "total");
+    assert_eq!(got["results"][2]["series"][0]["name"], "system");
 
     let (status, info) = get(format!("{base}/info")).await;
     assert_eq!(status, 200);
