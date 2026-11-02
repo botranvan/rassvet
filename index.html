@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rassvet — the next-gen OpenStack dashboard</title>
+  <meta name="description" content="Rassvet is a single-binary dashboard for OpenStack, written in Rust with an embedded React UI. Monitors, a command palette for everything, and an extension model that keeps the host clean.">
+  <meta name="theme-color" content="#070d1a">
+  <meta property="og:title" content="Rassvet — the next-gen OpenStack dashboard">
+  <meta property="og:description" content="Single binary. Rust + React. Monitors, command palette and compile-time extensions for OpenStack.">
+  <meta property="og:image" content="assets/img/overview.png">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <script>
+    try { var t = localStorage.getItem("rassvet-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="progress" aria-hidden="true"></div>
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <!-- ============================== NAV -->
+  <header class="nav" id="top">
+    <div class="container nav__inner">
+      <a class="brand" href="#top" aria-label="Rassvet home">
+        <img src="assets/img/logo.svg" alt="" width="30" height="30">
+        <span>rassvet</span>
+      </a>
+      <nav class="nav__links" aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#palette">Palette</a>
+        <a href="#monitors">Monitors</a>
+        <a href="#extensions">Extensions</a>
+        <a href="#design">Design</a>
+        <a href="#start">Get started</a>
+      </nav>
+      <div class="nav__actions">
+        <button class="kbd-btn" data-open-palette aria-label="Open command palette">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Search</span><kbd>⌘K</kbd>
+        </button>
+        <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme">
+          <svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+        <a class="btn btn--sm btn--ghost hide-sm" href="https://github.com/botranvan/rassvet" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" class="gh"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0C17.3 4.3 18.3 4.6 18.3 4.6c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg>
+          GitHub
+        </a>
+        <button class="icon-btn burger" aria-label="Menu" aria-expanded="false">
+          <span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============================== HERO -->
+    <section class="hero">
+      <div class="container hero__grid">
+        <div class="hero__copy">
+          <a class="pill reveal" href="#start">
+            <span class="pill__dot"></span> v0.1 · OpenStack 2026.2 Hibiscus ready
+            <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+          </a>
+          <h1 class="hero__title reveal">
+            OpenStack,<br><span class="grad">at first light.</span>
+          </h1>
+          <p class="hero__lead reveal">
+            <strong>Rassvet</strong> <em>(рассвет — “dawn”)</em> is a single-binary dashboard for OpenStack.
+            Rust on the server, React in the browser, Keystone tokens never leave the backend.
+            Built for the people who live in their cloud every day.
+          </p>
+          <div class="hero__cta reveal">
+            <a class="btn btn--primary magnetic" href="#start">
+              Get started
+              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+            <button class="btn btn--ghost magnetic" data-open-palette>
+              Try the palette <kbd>⌘K</kbd>
+            </button>
+          </div>
+          <dl class="stats reveal">
+            <div><dt data-count="1">0</dt><dd>binary to deploy</dd></div>
+            <div><dt data-count="7">0</dt><dd>core services</dd></div>
+            <div><dt data-count="4">0</dt><dd>built-in extensions</dd></div>
+            <div><dt data-count="25" data-suffix="+">0</dt><dd>resource kinds searchable</dd></div>
+          </dl>
+        </div>
+
+        <div class="hero__visual reveal" data-tilt>
+          <div class="sun" aria-hidden="true">
+            <div class="sun__disc"></div>
+            <div class="sun__rays"></div>
+          </div>
+          <div class="window">
+            <div class="window__bar">
+              <i></i><i></i><i></i>
+              <div class="window__url">rassvet.cloud.example / compute / instances</div>
+            </div>
+            <div class="window__tabs" role="tablist">
+              <button class="is-active" data-shot="overview">Overview</button>
+              <button data-shot="monitors">Monitors</button>
+              <button data-shot="palette">Palette</button>
+              <button data-shot="topology">Topology</button>
+            </div>
+            <div class="window__body">
+              <img class="shot is-active" data-shot="overview" src="assets/img/overview.png" alt="Rassvet project overview" width="1440" height="900">
+              <img class="shot" data-shot="monitors" src="assets/img/instance-monitors.png" alt="Instance monitors with CPU, memory and disk charts" loading="lazy" width="1440" height="900">
+              <img class="shot" data-shot="palette" src="assets/img/palette.png" alt="Command palette searching for web" loading="lazy" width="1440" height="900">
+              <img class="shot" data-shot="topology" src="assets/img/topology.png" alt="Network topology graph" loading="lazy" width="1440" height="900">
+            </div>
+          </div>
+          <div class="float-card float-card--a">
+            <span class="led led--green"></span>
+            <div><b>web-01</b><small>ACTIVE · m1.small</small></div>
+          </div>
+          <div class="float-card float-card--b">
+            <svg viewBox="0 0 120 36" class="spark"><path d="M0 28 L12 22 L24 25 L36 12 L48 16 L60 6 L72 14 L84 9 L96 18 L108 10 L120 14"/></svg>
+            <div><b>CPU 43.4%</b><small>avg · last 6h</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="marquee" aria-label="Supported OpenStack services">
+        <div class="marquee__track">
+          <span>Keystone</span><span>Nova</span><span>Neutron</span><span>Cinder</span><span>Glance</span><span>Placement</span><span>Barbican</span><span>Swift / S3</span><span>Octavia</span><span>Magnum</span><span>Designate</span><span>Prometheus</span><span>VictoriaMetrics</span><span>Terraform</span>
+          <span>Keystone</span><span>Nova</span><span>Neutron</span><span>Cinder</span><span>Glance</span><span>Placement</span><span>Barbican</span><span>Swift / S3</span><span>Octavia</span><span>Magnum</span><span>Designate</span><span>Prometheus</span><span>VictoriaMetrics</span><span>Terraform</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== FEATURES -->
+    <section class="section" id="features">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Why Rassvet</span>
+          <h2>Everything an operator reaches for,<br><span class="grad">nothing they trip over.</span></h2>
+          <p>One process, one config file, a UI that is fast enough to keep up with your keyboard.</p>
+        </header>
+
+        <div class="bento">
+          <article class="card card--xl spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+            <h3>Monitors</h3>
+            <p>CPU, memory, disk and network dashboards for every instance and physical server, straight from Prometheus — defined in YAML, up to 60 days back.</p>
+            <div class="mini-chart" aria-hidden="true"><canvas data-mini-chart></canvas></div>
+            <a class="card__link" href="#monitors">Explore monitors →</a>
+          </article>
+
+          <article class="card card--tall spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 0 0 0-6z"/></svg></div>
+            <h3>Command palette</h3>
+            <p>Press <kbd>⌘K</kbd> and go anywhere: pages, actions, resource names, IPs, CIDRs or a pasted UUID.</p>
+            <ul class="typing-list" aria-hidden="true">
+              <li><span class="tag">ins:</span>web</li>
+              <li><span class="tag">vol:</span>db</li>
+              <li>10.0.0.15</li>
+              <li>launch</li>
+              <li>dark theme</li>
+            </ul>
+            <a class="card__link" href="#palette">See it in action →</a>
+          </article>
+
+          <article class="card card--wide spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+            <h3>Easy to extend</h3>
+            <p>An extension is a Rust crate plus a React folder. It brings its own routes, nav entries, palette actions, Terraform export and cleanup finders, and the host needs no changes. Octavia, Magnum, Designate and Monitors are all built this way.</p>
+            <div class="ext-chips" aria-hidden="true"><span>lib.rs</span><span>index.tsx</span><span>palette.ts</span><span>terraform.ts</span><span>cleanup.tsx</span></div>
+            <a class="card__link" href="#extensions">Build one →</a>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg></div>
+            <h3>Single binary</h3>
+            <p>The React UI is embedded into the Rust binary. <code>cargo build --release</code> and ship.</p>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></div>
+            <h3>Secure by default</h3>
+            <p>Opaque HttpOnly cookies, CSRF headers, sign-in throttling, encrypted memcached sessions.</p>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg></div>
+            <h3>Many clouds, one session</h3>
+            <p>Sign in to several clouds and switch per tab. Each keeps its own Keystone tokens.</p>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h4l6-6M11 12l6 6"/></svg></div>
+            <h3>Topology in 2D &amp; 3D</h3>
+            <p>Force graph, diagram and a three.js view of networks, routers and ports — export as SVG.</p>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="m8 3-6 6 6 6M16 9l6 6-6 6"/></svg></div>
+            <h3>Export to Terraform</h3>
+            <p>Turn resources you clicked together into code, with references, lookups and import blocks.</p>
+          </article>
+
+          <article class="card spot reveal">
+            <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></div>
+            <h3>Cleanup</h3>
+            <p>Find idle volumes, floating IPs and leftovers wasting quota — per project or across all.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== PALETTE -->
+    <section class="section section--split" id="palette">
+      <div class="container split">
+        <div class="split__copy reveal">
+          <span class="eyebrow">Keyboard first</span>
+          <h2>The fastest way<br><span class="grad">to go anywhere.</span></h2>
+          <p>The command palette searches every kind of resource the cloud has — instances, volumes, ports,
+            routers, secrets, DNS zones, Kubernetes clusters — plus pages and actions. Paste a UUID and it
+            opens the resource. Type <code>vol:db</code> to search one kind only.</p>
+          <ul class="checks">
+            <li>Pages, actions and resources in one list</li>
+            <li><code>&lt;alias&gt;:&lt;name&gt;</code> scoped search, IPs and CIDRs</li>
+            <li>Switch project, region or cloud without the mouse</li>
+            <li>Extensions add their own keywords, actions and kinds</li>
+          </ul>
+          <button class="btn btn--primary magnetic" data-open-palette>
+            Open the palette on this page <kbd>⌘K</kbd>
+          </button>
+        </div>
+
+        <div class="demo reveal" aria-hidden="true">
+          <div class="demo__palette">
+            <div class="demo__input">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <span id="demo-typed"></span><span class="caret"></span>
+              <kbd>Esc</kbd>
+            </div>
+            <ul class="demo__results" id="demo-results"></ul>
+            <div class="demo__foot"><span>↑↓ to move</span><span>↵ to open</span><span class="r">Names or a pasted UUID find resources</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== MONITORS -->
+    <section class="section" id="monitors">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Monitors</span>
+          <h2>Dashboards that come<br><span class="grad">from your Prometheus.</span></h2>
+          <p>Instance monitors for every project user, physical server monitors for admins. Panels are plain YAML:
+            copy the built-ins, change a query, reload.</p>
+        </header>
+
+        <div class="monitor-grid">
+          <div class="panel reveal">
+            <div class="panel__head">
+              <div><b>CPU usage</b><small>web-01 · last 6 hours</small></div>
+              <div class="seg" role="group" aria-label="Series">
+                <button class="is-on" data-series="0">total</button>
+                <button class="is-on" data-series="1">user</button>
+                <button class="is-on" data-series="2">system</button>
+              </div>
+            </div>
+            <canvas id="live-chart" height="260"></canvas>
+            <table class="legend">
+              <thead><tr><th>Series</th><th>Last</th><th>Avg</th><th>Max</th></tr></thead>
+              <tbody id="legend-body"></tbody>
+            </table>
+          </div>
+
+          <div class="panel panel--gauge reveal">
+            <div class="panel__head"><div><b>Memory in use now</b><small>guest · virtio-balloon</small></div></div>
+            <svg class="gauge" viewBox="0 0 200 120">
+              <defs>
+                <linearGradient id="g-grad" x1="0" x2="1"><stop offset="0" stop-color="#2d8cff"/><stop offset="1" stop-color="#22b5b0"/></linearGradient>
+              </defs>
+              <path class="gauge__track" d="M20 110 A80 80 0 0 1 180 110"/>
+              <path class="gauge__fill" id="gauge-fill" d="M20 110 A80 80 0 0 1 180 110"/>
+            </svg>
+            <div class="gauge__value"><span id="gauge-value">0</span>%</div>
+            <div class="gauge__scale"><span>0%</span><span>used</span><span>100%</span></div>
+          </div>
+
+          <div class="code reveal">
+            <div class="code__bar"><span>panels/default.yaml</span><button class="copy" data-copy="#yaml-src">Copy</button></div>
+<pre id="yaml-src"><code><span class="c"># instances: the libvirt exec script</span>
+- <span class="k">dashboard</span>: <span class="s">cloud.*</span>
+  <span class="k">title</span>: <span class="s">Instances</span>
+  <span class="k">kind</span>: <span class="s">instance</span>        <span class="c"># or physical</span>
+  <span class="k">panels</span>:
+    - <span class="k">name</span>: <span class="s">cpu</span>
+      <span class="k">title</span>: <span class="s">CPU usage</span>
+      <span class="k">unit</span>: <span class="s">percent</span>
+      <span class="k">queries</span>:
+        - <span class="k">query</span>: <span class="s">&gt;-
+            100 * sum(rate(libvirt_cpu_user{
+              guest_id="$guest_id"}[$__rate_interval]))
+            / 1e9 / max(libvirt_cpu_number{...})</span>
+          <span class="k">legend</span>: <span class="s">user</span></code></pre>
+          </div>
+
+          <figure class="shot-card reveal" data-lightbox="assets/img/physical-server-monitors.png">
+            <img src="assets/img/physical-server-monitors.png" alt="Physical server monitors dashboard" loading="lazy">
+            <figcaption>Physical server monitors — the whole fleet, then one host.</figcaption>
+          </figure>
+        </div>
+
+        <ul class="feature-row reveal">
+          <li><b>Line, stat, gauge &amp; pie</b><span>panels with last / avg / max tables</span></li>
+          <li><b>Variables</b><span>dropdowns kept in the URL, shareable</span></li>
+          <li><b>Scoped</b><span>users only see their own project</span></li>
+          <li><b>Auto refresh</b><span>every minute, or ↻ right away</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================== EXTENSIONS -->
+    <section class="section section--alt" id="extensions">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Easy to develop</span>
+          <h2>Extend it with a crate<br><span class="grad">and a folder.</span></h2>
+          <p>Octavia, Magnum, Designate and Monitors are all extensions. Each one is a compile-time Rust crate
+            with its own React UI — the host has no extension-specific code.</p>
+        </header>
+
+        <div class="ext">
+          <aside class="tree reveal">
+            <div class="tree__title">extensions/</div>
+            <ul>
+              <li class="dir open"><span>my-service/</span>
+                <ul>
+                  <li class="file" data-file="cargo"><span>Cargo.toml</span></li>
+                  <li class="dir open"><span>src/</span>
+                    <ul><li class="file is-active" data-file="lib"><span>lib.rs</span><em>Extension</em></li></ul>
+                  </li>
+                  <li class="dir open"><span>ui/</span>
+                    <ul>
+                      <li class="file" data-file="index"><span>index.tsx</span><em>routes</em></li>
+                      <li class="file" data-file="palette"><span>palette.ts</span><em>⌘K</em></li>
+                      <li class="file" data-file="terraform"><span>terraform.ts</span><em>IaC</em></li>
+                      <li class="file" data-file="cleanup"><span>cleanup.tsx</span><em>findings</em></li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </aside>
+
+          <div class="code code--big reveal">
+            <div class="code__bar"><span id="ext-file-name">src/lib.rs</span><button class="copy" data-copy="#ext-code">Copy</button></div>
+            <pre id="ext-code"><code></code></pre>
+          </div>
+        </div>
+
+        <ol class="steps">
+          <li class="reveal"><span class="steps__n">1</span><h4>Implement <code>Extension</code></h4><p>A manifest with required <code>service_types</code>, nav items and axum routes mounted at <code>/api/ext/&lt;id&gt;</code>.</p></li>
+          <li class="reveal"><span class="steps__n">2</span><h4>Export an <code>ExtensionUi</code></h4><p>Routes under <code>/ext/&lt;id&gt;/…</code>, importing components and the API client only from <code>@rassvet/sdk</code>.</p></li>
+          <li class="reveal"><span class="steps__n">3</span><h4>Register a feature</h4><p>Add <code>ext-&lt;id&gt;</code> in Cargo, register it — it appears only where the catalog has the service.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================== ARCHITECTURE -->
+    <section class="section" id="architecture">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Architecture</span>
+          <h2>Tokens stay on the server.<br><span class="grad">Always.</span></h2>
+        </header>
+        <div class="arch reveal">
+          <div class="arch__node">
+            <div class="arch__icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg></div>
+            <b>Browser</b><small>React + TypeScript + Tailwind</small>
+            <span class="chip">HttpOnly · SameSite=Strict</span>
+          </div>
+          <div class="arch__wire"><i></i><span>/api · X-Rassvet-CSRF</span></div>
+          <div class="arch__node arch__node--core">
+            <div class="arch__icon"><img src="assets/img/logo.svg" alt=""></div>
+            <b>rassvet</b><small>Rust · axum · tokio · reqwest</small>
+            <div class="arch__mods"><span>sessions</span><span>core API</span><span>extensions</span><span>embedded UI</span></div>
+          </div>
+          <div class="arch__wire"><i></i><span>Keystone token · microversions</span></div>
+          <div class="arch__node">
+            <div class="arch__icon"><svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg></div>
+            <b>OpenStack</b><small>2026.1 Gazpacho → 2026.2 Hibiscus</small>
+            <span class="chip">global_request_id traced</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== DESIGN -->
+    <section class="section section--alt" id="design">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">UI / UX model</span>
+          <h2>Designed like a<br><span class="grad">datacenter console.</span></h2>
+          <p>A small, strict design language so every page behaves the same — learn one list, know them all.</p>
+        </header>
+
+        <div class="principles">
+          <div class="principle reveal">
+            <div class="swatches"><i style="--c:#1b2029"></i><i style="--c:#232a35"></i><i style="--c:#2e3644"></i></div>
+            <h4>Rack graphite</h4><p>Neutral surfaces that stay out of the way of your data.</p>
+          </div>
+          <div class="principle reveal">
+            <div class="swatches"><i style="--c:#0f8b8d"></i><i style="--c:#22b5b0"></i><i style="--c:#e3f3f2"></i></div>
+            <h4>One accent: patch-cable teal</h4><p>Reserved for the active state and the primary action.</p>
+          </div>
+          <div class="principle reveal">
+            <div class="swatches leds"><i style="--c:#3dcb7a"></i><i style="--c:#e8a33d"></i><i style="--c:#e5484d"></i></div>
+            <h4>Status LEDs</h4><p>Green, amber, red — for resource state only, never decoration.</p>
+          </div>
+          <div class="principle reveal">
+            <div class="type-sample"><span>Aa</span><code>{ }</code></div>
+            <h4>Be Vietnam Pro + JetBrains Mono</h4><p>Readable UI type, monospaced IDs, IPs and code.</p>
+          </div>
+        </div>
+
+        <div class="ux-grid">
+          <div class="ux reveal"><span>01</span><h4>Same list everywhere</h4><p>Filter, sort, server-side search, column chooser, CSV export and a ⋮ menu on every row.</p></div>
+          <div class="ux reveal"><span>02</span><h4>Actions where you look</h4><p>Row menus and the detail page share the same set of actions.</p></div>
+          <div class="ux reveal"><span>03</span><h4>Policy-aware menus</h4><p>Entries appear only when the cloud lets the user use them.</p></div>
+          <div class="ux reveal"><span>04</span><h4>Wizards with impact</h4><p>The launch wizard reviews quota impact before anything is created.</p></div>
+          <div class="ux reveal"><span>05</span><h4>Shareable URLs</h4><p>Filters, instance and time range live in the address bar.</p></div>
+          <div class="ux reveal"><span>06</span><h4>Light &amp; dark</h4><p>Both themes, a collapsible sidebar, and the choice is remembered.</p></div>
+        </div>
+
+        <div class="gallery">
+          <figure class="reveal" data-lightbox="assets/img/launch-3-flavor.png"><img src="assets/img/launch-3-flavor.png" alt="Launch wizard flavor step" loading="lazy"><figcaption>Launch wizard</figcaption></figure>
+          <figure class="reveal" data-lightbox="assets/img/terraform.png"><img src="assets/img/terraform.png" alt="Export to Terraform" loading="lazy"><figcaption>Export to Terraform</figcaption></figure>
+          <figure class="reveal" data-lightbox="assets/img/admin-hypervisors.png"><img src="assets/img/admin-hypervisors.png" alt="Admin hypervisors" loading="lazy"><figcaption>Hypervisors</figcaption></figure>
+          <figure class="reveal" data-lightbox="assets/img/topology.png"><img src="assets/img/topology.png" alt="Network topology" loading="lazy"><figcaption>Topology</figcaption></figure>
+          <figure class="reveal" data-lightbox="assets/img/cleanup.png"><img src="assets/img/cleanup.png" alt="Cleanup" loading="lazy"><figcaption>Cleanup</figcaption></figure>
+          <figure class="reveal" data-lightbox="assets/img/palette-cloud.png"><img src="assets/img/palette-cloud.png" alt="Switch cloud from the palette" loading="lazy"><figcaption>Switch cloud</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== GET STARTED -->
+    <section class="section" id="start">
+      <div class="container">
+        <div class="cta-box reveal">
+          <div class="cta-box__copy">
+            <span class="eyebrow">Get started</span>
+            <h2>From clone to dashboard<br><span class="grad">in three commands.</span></h2>
+            <p>Requirements: Rust 1.88+ (edition 2024), Node 22+, pnpm 10+. Copy
+              <code>rassvet.example.toml</code> to <code>rassvet.toml</code> and set your Keystone <code>auth_url</code>.</p>
+            <div class="hero__cta">
+              <a class="btn btn--primary magnetic" href="https://github.com/botranvan/rassvet" target="_blank" rel="noopener">View on GitHub</a>
+              <a class="btn btn--ghost magnetic" href="https://github.com/botranvan/rassvet/tree/master/docs" target="_blank" rel="noopener">Read the guide</a>
+            </div>
+          </div>
+          <div class="term">
+            <div class="term__tabs" role="tablist">
+              <button class="is-active" data-term="build">Build</button>
+              <button data-term="dev">Develop</button>
+              <button data-term="config">Config</button>
+            </div>
+            <div class="term__body">
+              <button class="copy" data-copy-active>Copy</button>
+<pre class="is-active" data-term="build"><code><span class="p">$</span> cd ui &amp;&amp; pnpm install &amp;&amp; pnpm build &amp;&amp; cd ..
+<span class="p">$</span> cargo build --release
+<span class="p">$</span> ./target/release/rassvet --config rassvet.toml
+<span class="c"># then open http://localhost:8080</span></code></pre>
+<pre data-term="dev"><code><span class="p">$</span> cargo run -p rassvet -- -c rassvet.toml   <span class="c"># API on :8080</span>
+<span class="p">$</span> cd ui &amp;&amp; pnpm dev                       <span class="c"># UI on :5173</span>
+<span class="p">$</span> cargo test &amp;&amp; cargo clippy --all-targets</code></pre>
+<pre data-term="config"><code><span class="c"># rassvet.toml</span>
+[server]
+secure_cookies = <span class="s">true</span>
+
+[memcached]
+servers = [<span class="s">"10.0.0.11:11211"</span>, <span class="s">"10.0.0.12:11211"</span>]
+secret_key_file = <span class="s">"/etc/rassvet/session.key"</span></code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="brand"><img src="assets/img/logo.svg" alt="" width="26" height="26"><span>rassvet</span></div>
+      <p>Next-gen OpenStack dashboard · Rust + React · Released under the license in the repository.</p>
+      <div class="footer__links">
+        <a href="https://github.com/botranvan/rassvet" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/botranvan/rassvet/tree/master/docs" target="_blank" rel="noopener">Docs</a>
+        <a href="#top">Back to top ↑</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ============================== REAL COMMAND PALETTE -->
+  <div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+    <div class="cmdk__backdrop" data-close></div>
+    <div class="cmdk__panel">
+      <div class="cmdk__input">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="cmdk-input" type="text" placeholder="Search sections, actions… try “mon” or “theme”" autocomplete="off" spellcheck="false">
+        <kbd>Esc</kbd>
+      </div>
+      <ul class="cmdk__list" id="cmdk-list" role="listbox"></ul>
+      <div class="cmdk__foot"><span>↑↓ to move</span><span>↵ to open</span><span class="r">This palette is a tiny tribute to the real one</span></div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden><img alt=""><button class="icon-btn" aria-label="Close">✕</button></div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="assets/js/main.js" defer></script>
+</body>
+</html>
