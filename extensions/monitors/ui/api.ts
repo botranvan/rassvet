@@ -156,6 +156,7 @@ export const useVariables = (dashboard: Dashboard | undefined, picked: Record<st
         `${BASE}/variables?${qs({
           dashboard: dashboard!.id,
           project_id: target.project_id,
+          guest_id: target.guest_id,
           compute_node_id: target.compute_node_id,
           hostname: target.hostname,
           ...varParams(picked),

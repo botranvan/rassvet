@@ -502,6 +502,12 @@ async fn resolve_vars(
         Kind::Instance => {
             let p = a.project(params.get("project_id").map(String::as_str))?;
             vars.insert("project_id", p.unwrap_or_else(|| ".+".into()));
+            // The picked instance; empty when none is (its selectors then match nothing).
+            let guest = params.get("guest_id").filter(|v| !v.is_empty());
+            vars.insert(
+                "guest_id",
+                guest.map(|g| id_param(g)).transpose()?.unwrap_or_default(),
+            );
         }
         Kind::Physical => {
             for name in ["compute_node_id", "hostname"] {
@@ -555,7 +561,7 @@ struct VariablesQuery {
 }
 
 /// The values of a dashboard's query variables, resolved in order from the picked ones
-/// (`var-<name>=…`), and `project_id` / `compute_node_id` / `hostname` when picked.
+/// (`var-<name>=…`), and `project_id` / `guest_id` / `compute_node_id` / `hostname` when picked.
 async fn variables(
     Ext(clouds): Ext<Clouds>,
     ctx: RequestContext,

@@ -232,11 +232,23 @@ Rules:
 
 - Order matters: write `variables` as a list when they depend on each other. A query variable may use the
   constant variables, `$region`, the query variables before it and, in instance dashboards,
-  `$project_id`; a variable used before it's defined is refused when the files are loaded.
+  `$project_id` and `$guest_id` (the instance picked in **Instance**); a variable used before it's defined
+  is refused when the files are loaded.
 - **Instance dashboards:** the selector must match `project_id=~"$project_id"`. As in `discover`,
   `$project_id` is a regular expression here: the user's project, or for admins the picked project (`.+`
   for all projects). Project users only ever see their own project's values. `label_values(<label>)`
   without a selector isn't allowed.
+- **The picked instance:** a variable can read labels of the picked instance, for example its name:
+
+  ```yaml
+  variables:
+    - guest_name: label_values({project_id="$project_id", guest_id="$guest_id"}, guest_name)
+  ```
+
+  Its values are listed again when another instance is picked. While no instance is picked, `$guest_id`
+  is empty and such a variable has no values. With an instance picked, `$project_id` is that instance's
+  project, so `project_id="$project_id"` works too; without one, admins looking at all projects need
+  `project_id=~"$project_id"`.
 - **Physical dashboards** may define `compute_node_id` and `hostname` themselves, as in the example.
   The dashboard then has no **Physical server** picker: its variables pick the server, and all its panels
   are shown at once. Without them, the server picker fills `$compute_node_id` and `$hostname`, and query

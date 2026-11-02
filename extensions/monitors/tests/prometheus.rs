@@ -497,3 +497,57 @@ async fn instance_variables_stay_in_the_project() {
     assert_eq!(got[0]["values"], json!(["web"]));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[tokio::test]
+async fn instance_variables_from_the_picked_instance() {
+    let dir = std::env::temp_dir().join(format!("rassvet-monitors-gvars-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("u.yaml"),
+        r#"
+- dashboard: cloud.user
+  variables:
+    - monitor: cloud-infras
+    - database: public-infras
+    - guest_name: label_values({project_id="$project_id", guest_id="$guest_id"},guest_name)
+  panels:
+    - name: n
+      queries: [{query: 'max(libvirt_cpu_number{project_id="$project_id",guest_name="$guest_name"})', type: stat}]
+"#,
+    )
+    .unwrap();
+    let prom = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .and(query_param(
+            "match[]",
+            r#"{project_id="p1", guest_id="g1"}"#,
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(series_of(&[("guest_name", "edge-fw-001")])),
+        )
+        .expect(1)
+        .mount(&prom)
+        .await;
+    let base = serve_with(
+        &prom,
+        false,
+        &format!("monitor_panels_paths = \"{}\"", dir.display()),
+    )
+    .await;
+    let (status, got) = get(format!("{base}/variables?dashboard=cloud.user&guest_id=g1")).await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(
+        got[0],
+        json!({"name": "guest_name", "values": ["edge-fw-001"], "value": "edge-fw-001"})
+    );
+    assert_eq!(
+        get(format!(
+            "{base}/variables?dashboard=cloud.user&guest_id=a%22b"
+        ))
+        .await
+        .0,
+        400
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

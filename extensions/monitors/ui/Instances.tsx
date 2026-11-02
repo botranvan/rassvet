@@ -59,7 +59,8 @@ function InstancesPage({ admin, maxDays, ownProject }: { admin: boolean; maxDays
 
   const target = dash?.panels.filter((p) => p.scope === "target") ?? [];
   const overview = dash?.panels.filter((p) => p.scope === "overview") ?? [];
-  const dv = useDashboardVars(dash, params, { project_id: projectId || undefined }, range);
+  // Query variables may use the picked instance ($guest_id) and its project.
+  const dv = useDashboardVars(dash, params, { project_id: projectId || undefined, guest_id: guestId || undefined }, range);
   const clearVars = Object.fromEntries(Object.keys(pickedVars(params)).map((k) => [`var-${k}`, null]));
 
   return (

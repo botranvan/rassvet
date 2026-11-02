@@ -491,7 +491,8 @@ fn check_vars(d: &mut Dashboard) -> anyhow::Result<()> {
         };
         let mut known: Vec<&str> = vec!["region"];
         match d.kind {
-            Kind::Instance => known.push("project_id"),
+            // The picked instance, from Rassvet's instance picker.
+            Kind::Instance => known.extend(["project_id", "guest_id"]),
             Kind::Physical if d.server_picker => known.extend(["compute_node_id", "hostname"]),
             Kind::Physical => {}
         }
@@ -1109,6 +1110,13 @@ mod tests {
   panels: [{name: a, queries: [{query: 'y{project_id="$project_id",f="$flavor"}'}]}]
 "#;
         assert!(one(scoped).unwrap().dashboards[0].server_picker);
+        let by_guest = r#"
+- dashboard: cloud.user
+  variables:
+    - guest_name: label_values({project_id="$project_id", guest_id="$guest_id"},guest_name)
+  panels: [{name: a, queries: [{query: 'y{project_id="$project_id",n="$guest_name"}'}]}]
+"#;
+        assert!(one(by_guest).is_ok());
         let own_host = "- dashboard: cloud.*\n  variables: [{hostname: a}]\n  panels: [{name: a, queries: [{query: 'y{project_id=\"$project_id\"}'}]}]\n";
         assert!(one(own_host).is_err());
         assert!(one("- dashboard: x\n  variables: [{a: 'label_values(x, \"bad\")'}]\n").is_err());
