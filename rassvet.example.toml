@@ -50,10 +50,10 @@ interface = "public"          # public | internal | admin
 # ca_file = "/etc/ssl/certs/openstack-ca.pem"
 insecure_tls = false
 
-# Optional: Monitors extension. Charts of instances (libvirt) and physical servers, read from
-# a Prometheus-compatible API that Telegraf writes to. Without this table the extension is
-# hidden in this cloud. Project users only see series whose project_id is their project;
-# admins see every project and the physical servers.
+# Optional: Monitors extension. Dashboards of instances and physical servers, read from a
+# Prometheus-compatible API (Prometheus, VictoriaMetrics…). Without this table the extension is
+# hidden in this cloud. Project users only get their own project ($project_id); admins see
+# every project and the physical servers.
 # [cloud.extensions.monitors]
 # prometheus_url = "http://prometheus.example.com:9090"
 # # bearer_token_file = "/etc/rassvet/prometheus.token"   # or bearer_token = "…"
@@ -65,7 +65,7 @@ insecure_tls = false
 # admin_max_range_days = 365      # how far back an admin may look
 # # timeout_seconds = 30
 # # rate_window_seconds = 300     # smallest rate() window: ≥ 4 × the Telegraf interval
-# # region_filter = false         # also match region="<session region>" (one Prometheus, several regions)
-# # Regular expressions (whole value) for the `monitor` label, e.g. "cloud-infras":
-# # cloud_monitor = "cloud.*"       # instance (libvirt) metrics
-# # physical_monitor = "physical.*" # physical server metrics
+# # Dashboards and panels: YAML files, or directories of *.yaml / *.yml files (a string or a
+# # list). Changes are picked up within seconds. Without it, the built-in panels are used
+# # (extensions/monitors/panels/default.yaml: copy it there to start from).
+# monitor_panels_paths = "/etc/rassvet/monitor-panels"

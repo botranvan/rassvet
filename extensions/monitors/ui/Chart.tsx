@@ -14,7 +14,7 @@ const STYLE = `
 .dark .mon-chart{--mon-1:#3987e5;--mon-2:#d95926;--mon-3:#199e70;--mon-4:#c98500;--mon-5:#d55181;--mon-6:#008300;--mon-7:#9085e9;--mon-8:#e66767}
 `;
 let styled = false;
-function useChartStyle() {
+export function useChartStyle() {
   useEffect(() => {
     if (styled) return;
     styled = true;

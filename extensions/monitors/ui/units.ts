@@ -25,6 +25,7 @@ export function scaleFor(unit: Unit, max: number): Scale {
   const m = Math.abs(max);
   switch (unit) {
     case "percent":
+    case "percent_unit":
       return { div: 1, suffix: "%" };
     case "bytes":
       return stepScale(m, 1024, BIN);
@@ -44,7 +45,7 @@ export function scaleFor(unit: Unit, max: number): Scale {
       const s = stepScale(m, 1000, SI);
       return { div: s.div, suffix: `${s.suffix} pkt/s` };
     }
-    case "count":
+    default:
       return stepScale(m, 1000, SI);
   }
 }
@@ -59,6 +60,7 @@ function digits(v: number) {
 /** A value with its own best unit prefix, e.g. 1.5 GiB, 120 Mb/s, 3.2 ms. */
 export function fmt(v: number | null | undefined, unit: Unit): string {
   if (v == null || !Number.isFinite(v)) return "—";
+  if (unit === "percent_unit") return fmt(v * 100, "percent");
   const s = scaleFor(unit, v);
   const x = v / s.div;
   if (unit === "count" && s.div === 1) return Number.isInteger(x) ? String(x) : x.toFixed(digits(x));

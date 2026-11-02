@@ -150,6 +150,46 @@ impl Prometheus {
             .collect())
     }
 
+    /// Evaluate `query` at `time`: one value per series (a scalar result is one series
+    /// without labels).
+    pub async fn query(&self, query: &str, time: i64) -> Result<Vec<Series>, ApiError> {
+        let v: Value = self
+            .get(
+                "api/v1/query",
+                &[("query", query.to_owned()), ("time", time.to_string())],
+            )
+            .await?;
+        let num = |p: &Value| -> Option<(f64, f64)> {
+            let t = p.get(0)?.as_f64()?;
+            let v = p
+                .get(1)?
+                .as_str()?
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())?;
+            Some((t, v))
+        };
+        match v.get("resultType").and_then(Value::as_str) {
+            Some("vector") => Ok(v["result"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|i| Series {
+                    labels: serde_json::from_value(i["metric"].clone()).unwrap_or_default(),
+                    values: num(&i["value"]).into_iter().collect(),
+                })
+                .collect()),
+            Some("scalar") => Ok(vec![Series {
+                labels: Labels::new(),
+                values: num(&v["result"]).into_iter().collect(),
+            }]),
+            other => Err(upstream(format!(
+                "Prometheus returned a {} for an instant query",
+                other.unwrap_or("result")
+            ))),
+        }
+    }
+
     /// Label sets of the series matching any of `matchers` between `start` and `end`.
     pub async fn series(
         &self,

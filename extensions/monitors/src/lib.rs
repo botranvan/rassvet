@@ -1,26 +1,29 @@
-//! Monitors extension: charts of Nova instances (libvirt guests) and of physical servers,
-//! read from the Prometheus configured for each cloud in `[cloud.extensions.monitors]`.
+//! Monitors extension: dashboards of Nova instances (libvirt guests) and of physical servers,
+//! read from the Prometheus-compatible API configured for each cloud in
+//! `[cloud.extensions.monitors]` (Prometheus, VictoriaMetrics, Thanos, Mimir…).
 //!
-//! Metrics are written by Telegraf (exec scripts for libvirt and the OpenStack database, and
-//! Telegraf's own inputs on the physical servers) and keep their labels: `project_id`,
-//! `project_name`, `region`, `guest_id`, `guest_name`, `monitor` (`cloud` | `physical`) and,
-//! for physical servers, `compute_node_id` and `hostname`.
+//! What is charted is not built in: dashboards and panels are PromQL templates in YAML files
+//! (`monitor_panels_paths`, see [`dashboards`]); without that setting the built-in
+//! `panels/default.yaml` is used. Templates use Grafana-style variables (`$project_id`,
+//! `$guest_id`, `$compute_node_id`, `$hostname`, `$region`, `$__rate_interval`, `$__interval`,
+//! `$__range`) that the server fills, plus each dashboard's own `variables` (e.g. `$monitor`).
 //!
 //! Who sees what is decided here, never by the browser:
-//! * a project user only gets series with `project_id` = the project of their token, may not
-//!   look at physical servers, and may look back at most `project_max_range_days` (60);
+//! * a project user's `$project_id` is always the project of their token (every instance query
+//!   must use it), they may not open physical dashboards, and may look back at most
+//!   `project_max_range_days` (60);
 //! * an admin (admin role) may pick any project, instance or physical server, and may look
 //!   back `admin_max_range_days` (365).
 //!
-//! Routes under `/api/ext/monitors`: `info`, `panels?kind=`, `projects`, `guests`, `hosts`,
-//! `series?kind=&panel=…`. Users choose a chart by id ([`panels`]); the PromQL is built here.
+//! Routes under `/api/ext/monitors`: `info`, `dashboards?kind=`, `targets?dashboard=`,
+//! `query?dashboard=&panel=&…`.
 
-mod panels;
+pub mod dashboards;
 mod prom;
 mod settings;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -34,13 +37,13 @@ use rassvet_ext_api::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use panels::{Kind, Matchers, Panel};
+use dashboards::{ChartType, Dashboard, Kind, Panel, Panels};
 use prom::{Labels, Prometheus};
 use settings::Settings;
 
 pub const ID: &str = "monitors";
 
-/// Most series drawn in one chart; the quietest ones beyond it are left out.
+/// Most time series drawn in one chart; the quietest ones beyond it are left out.
 const MAX_SERIES: usize = 8;
 /// Points per series a chart asks for (the step follows from the time range).
 const MAX_POINTS: i64 = 300;
@@ -50,6 +53,7 @@ const DEFAULT_RANGE: i64 = 3600;
 struct Cloud {
     settings: Settings,
     prom: Prometheus,
+    panels: Panels,
 }
 
 type Clouds = Arc<HashMap<String, Arc<Cloud>>>;
@@ -59,18 +63,34 @@ pub struct Monitors {
 }
 
 impl Monitors {
-    /// Build from the `[cloud.extensions.monitors]` table of each cloud that has one.
+    /// Build from the `[cloud.extensions.monitors]` table of each cloud that has one, loading
+    /// its panel files.
     pub fn from_settings(clouds: Vec<(String, toml::Value)>) -> anyhow::Result<Self> {
         let mut map = HashMap::new();
         for (id, v) in clouds {
             let settings = Settings::parse(&id, v)?;
             let prom = Prometheus::new(&settings)?;
+            let paths = settings.monitor_panels_paths.as_ref().map(|p| p.list());
+            let panels = Panels::load(paths.clone())
+                .map_err(|e| anyhow::anyhow!("cloud '{id}': monitor panels: {e:#}"))?;
+            let cat = panels.get();
             tracing::info!(
                 cloud = id,
                 url = settings.prometheus_url,
+                panels = paths
+                    .map(|p| p.join(", "))
+                    .unwrap_or_else(|| "built-in".into()),
+                dashboards = cat.dashboards.len(),
                 "monitors: Prometheus configured"
             );
-            map.insert(id, Arc::new(Cloud { settings, prom }));
+            map.insert(
+                id,
+                Arc::new(Cloud {
+                    settings,
+                    prom,
+                    panels,
+                }),
+            );
         }
         Ok(Self {
             clouds: Arc::new(map),
@@ -84,7 +104,7 @@ impl Extension for Monitors {
             id: ID,
             name: "Monitors",
             version: env!("CARGO_PKG_VERSION"),
-            description: "Charts of instances (libvirt) and physical servers from Prometheus, collected by Telegraf",
+            description: "Dashboards of instances and physical servers from Prometheus, defined in YAML panel files",
             service_types: &[],
         }
     }
@@ -127,11 +147,9 @@ impl Extension for Monitors {
     fn router(&self) -> Router {
         Router::new()
             .route("/info", get(info))
-            .route("/panels", get(list_panels))
-            .route("/projects", get(projects))
-            .route("/guests", get(guests))
-            .route("/hosts", get(hosts))
-            .route("/series", get(series))
+            .route("/dashboards", get(list_dashboards))
+            .route("/targets", get(targets))
+            .route("/query", get(query))
             .layer(Ext(self.clouds.clone()))
     }
 
@@ -151,9 +169,9 @@ fn err(status: StatusCode, msg: impl Into<String>) -> ApiError {
 struct Access {
     cloud: Arc<Cloud>,
     admin: bool,
-    /// The project of the token: the only `project_id` a project user gets series of.
+    /// The project of the token: the only `$project_id` a project user gets.
     own_project: Option<String>,
-    region: Option<String>,
+    region: String,
 }
 
 impl Access {
@@ -173,19 +191,15 @@ impl Access {
             ));
         }
         Ok(Self {
-            region: ctx.region.clone().filter(|_| cloud.settings.region_filter),
+            region: ctx
+                .region
+                .clone()
+                .filter(|r| valid_id(r))
+                .unwrap_or_default(),
             cloud,
             admin,
             own_project,
         })
-    }
-
-    fn require_admin(&self) -> Result<(), ApiError> {
-        if self.admin {
-            Ok(())
-        } else {
-            Err(err(StatusCode::FORBIDDEN, "only admins can see this"))
-        }
     }
 
     fn max_range_days(&self) -> u32 {
@@ -196,8 +210,8 @@ impl Access {
         }
     }
 
-    /// The `project_id` to match: forced to the token's project for project users; for
-    /// admins the requested one, if any.
+    /// `$project_id`: always the token's project for project users; for admins the
+    /// requested one, if any.
     fn project(&self, requested: Option<&str>) -> Result<Option<String>, ApiError> {
         if !self.admin {
             return Ok(self.own_project.clone());
@@ -208,41 +222,30 @@ impl Access {
             .transpose()
     }
 
-    fn base(&self, monitor: Option<Monitor>) -> Matchers {
-        let mut m = Matchers::default();
-        let s = &self.cloud.settings;
-        match monitor {
-            Some(Monitor::Cloud) => m = m.with_re("monitor", s.cloud_monitor.clone()),
-            Some(Monitor::Physical) => m = m.with_re("monitor", s.physical_monitor.clone()),
-            None => {}
+    /// A dashboard this session may open.
+    fn dashboard<'a>(
+        &self,
+        cat: &'a dashboards::Catalog,
+        id: &str,
+    ) -> Result<&'a Dashboard, ApiError> {
+        let d = cat
+            .find(id)
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, format!("unknown dashboard {id:?}")))?;
+        if d.kind == Kind::Physical && !self.admin {
+            return Err(err(
+                StatusCode::FORBIDDEN,
+                "only admins can see physical servers",
+            ));
         }
-        if let Some(r) = &self.region {
-            m = m.with("region", r.clone());
-        }
-        m
+        Ok(d)
     }
 }
 
-/// Which `monitor` label values a selector matches (regexes from the settings).
-#[derive(Clone, Copy)]
-enum Monitor {
-    Cloud,
-    Physical,
-}
-
-/// Series that every monitored instance has: the instance pickers are built from these.
-fn guest_matchers(sel: &str) -> Vec<String> {
-    ["libvirt_cpu_time", "libvirt_memory_total"]
-        .iter()
-        .map(|m| format!("{m}{{{sel}}}"))
-        .collect()
-}
-
 fn id_param(v: &str) -> Result<String, ApiError> {
-    if valid_id(v) && v.len() <= 64 {
+    if valid_id(v) && v.len() <= 255 {
         Ok(v.to_owned())
     } else {
-        Err(err(StatusCode::BAD_REQUEST, format!("invalid id {v:?}")))
+        Err(err(StatusCode::BAD_REQUEST, format!("invalid value {v:?}")))
     }
 }
 
@@ -304,12 +307,6 @@ pub fn window(
     })
 }
 
-#[derive(Deserialize)]
-struct RangeQuery {
-    start: Option<i64>,
-    end: Option<i64>,
-}
-
 // ---------------------------------------------------------------------------- routes
 
 async fn info(Ext(clouds): Ext<Clouds>, ctx: RequestContext) -> Result<Json<Value>, ApiError> {
@@ -319,7 +316,6 @@ async fn info(Ext(clouds): Ext<Clouds>, ctx: RequestContext) -> Result<Json<Valu
         "max_range_days": a.max_range_days(),
         "project": ctx.token.project.as_ref().map(|p| json!({"id": p.id, "name": p.name})),
         "region": ctx.region,
-        "region_filter": a.cloud.settings.region_filter,
     })))
 }
 
@@ -328,60 +324,27 @@ struct KindQuery {
     kind: Kind,
 }
 
-async fn list_panels(
+/// The dashboards of one kind, with their panels (without the PromQL).
+async fn list_dashboards(
     Ext(clouds): Ext<Clouds>,
     ctx: RequestContext,
     Query(q): Query<KindQuery>,
-) -> Result<Json<Vec<&'static Panel>>, ApiError> {
+) -> Result<Json<Value>, ApiError> {
     let a = Access::new(&clouds, &ctx)?;
-    if q.kind == Kind::Host {
-        a.require_admin()?;
+    if q.kind == Kind::Physical && !a.admin {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "only admins can see physical servers",
+        ));
     }
-    Ok(Json(panels::of(q.kind).collect()))
-}
-
-#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
-struct ProjectItem {
-    project_name: String,
-    project_id: String,
-}
-
-/// Admin: the projects with instance metrics in the range.
-async fn projects(
-    Ext(clouds): Ext<Clouds>,
-    ctx: RequestContext,
-    Query(q): Query<RangeQuery>,
-) -> Result<Json<Vec<ProjectItem>>, ApiError> {
-    let a = Access::new(&clouds, &ctx)?;
-    a.require_admin()?;
-    let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let sel = a.base(Some(Monitor::Cloud)).render();
-    let found = a
-        .cloud
-        .prom
-        .series(&guest_matchers(&sel), w.start, w.end)
-        .await?;
-    let mut by_id: BTreeMap<String, String> = BTreeMap::new();
-    for l in found {
-        if let Some(id) = l.get("project_id") {
-            let name = l.get("project_name").cloned().unwrap_or_default();
-            by_id.insert(id.clone(), name);
-        }
-    }
-    let mut out: Vec<ProjectItem> = by_id
-        .into_iter()
-        .map(|(project_id, project_name)| ProjectItem {
-            project_name,
-            project_id,
-        })
-        .collect();
-    out.sort();
-    Ok(Json(out))
+    let cat = a.cloud.panels.get();
+    let list: Vec<&Dashboard> = cat.dashboards.iter().filter(|d| d.kind == q.kind).collect();
+    Ok(Json(serde_json::to_value(list).unwrap_or_default()))
 }
 
 #[derive(Deserialize)]
-struct GuestsQuery {
-    project_id: Option<String>,
+struct TargetsQuery {
+    dashboard: String,
     start: Option<i64>,
     end: Option<i64>,
 }
@@ -394,48 +357,6 @@ struct GuestItem {
     project_name: String,
 }
 
-fn label(l: &Labels, k: &str) -> String {
-    l.get(k).cloned().unwrap_or_default()
-}
-
-/// The instances with metrics in the range: of the token's project for project users, of
-/// the chosen project (or every project) for admins.
-async fn guests(
-    Ext(clouds): Ext<Clouds>,
-    ctx: RequestContext,
-    Query(q): Query<GuestsQuery>,
-) -> Result<Json<Vec<GuestItem>>, ApiError> {
-    let a = Access::new(&clouds, &ctx)?;
-    let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let mut sel = a.base(Some(Monitor::Cloud));
-    if let Some(p) = a.project(q.project_id.as_deref())? {
-        sel = sel.with("project_id", p);
-    }
-    let found = a
-        .cloud
-        .prom
-        .series(&guest_matchers(&sel.render()), w.start, w.end)
-        .await?;
-    let mut by_id: BTreeMap<String, GuestItem> = BTreeMap::new();
-    for l in found {
-        let Some(id) = l.get("guest_id") else {
-            continue;
-        };
-        by_id.insert(
-            id.clone(),
-            GuestItem {
-                guest_name: label(&l, "guest_name"),
-                guest_id: id.clone(),
-                project_id: label(&l, "project_id"),
-                project_name: label(&l, "project_name"),
-            },
-        );
-    }
-    let mut out: Vec<GuestItem> = by_id.into_values().collect();
-    out.sort();
-    Ok(Json(out))
-}
-
 #[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct HostItem {
     hostname: String,
@@ -443,160 +364,279 @@ struct HostItem {
     region: String,
 }
 
-/// Admin: the physical servers with metrics in the range.
-async fn hosts(
+fn label(l: &Labels, k: &str) -> String {
+    l.get(k).cloned().unwrap_or_default()
+}
+
+/// What can be picked on a dashboard, from its `discover` selector: instances (of the token's
+/// project for project users, of every project for admins) or physical servers.
+async fn targets(
     Ext(clouds): Ext<Clouds>,
     ctx: RequestContext,
-    Query(q): Query<RangeQuery>,
-) -> Result<Json<Vec<HostItem>>, ApiError> {
+    Query(q): Query<TargetsQuery>,
+) -> Result<Json<Value>, ApiError> {
     let a = Access::new(&clouds, &ctx)?;
-    a.require_admin()?;
+    let cat = a.cloud.panels.get();
+    let d = a.dashboard(&cat, &q.dashboard)?;
     let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let sel = a.base(Some(Monitor::Physical)).render();
-    // `up`-like metrics differ between setups; any CPU series of the server will do.
-    let found = a
-        .cloud
-        .prom
-        .series(
-            &[format!("cpu_usage_idle{{{sel},cpu=\"cpu-total\"}}")],
-            w.start,
-            w.end,
-        )
-        .await?;
-    let mut by_id: BTreeMap<String, HostItem> = BTreeMap::new();
-    for l in found {
-        let Some(id) = l.get("compute_node_id") else {
-            continue;
-        };
-        by_id.insert(
-            id.clone(),
-            HostItem {
-                hostname: label(&l, "hostname"),
-                compute_node_id: id.clone(),
-                region: label(&l, "region"),
-            },
-        );
-    }
-    let mut out: Vec<HostItem> = by_id.into_values().collect();
-    out.sort();
+    // In `discover`, $project_id is a regex: the project, or any for admins.
+    let project = a.project(None)?.unwrap_or_else(|| ".+".into());
+    let mut vars: HashMap<&str, String> = own_vars(d);
+    vars.insert("region", a.region.clone());
+    vars.insert("project_id", project);
+    let selector = dashboards::render(&d.discover, &vars);
+    let found = a.cloud.prom.series(&[selector], w.start, w.end).await?;
+
+    let out = match d.kind {
+        Kind::Instance => {
+            let mut by_id: BTreeMap<String, GuestItem> = BTreeMap::new();
+            for l in found {
+                let Some(id) = l.get("guest_id").filter(|v| !v.is_empty()) else {
+                    continue;
+                };
+                let project_id = label(&l, "project_id");
+                // Whatever `discover` says, a project user only gets their own instances.
+                if !a.admin && Some(&project_id) != a.own_project.as_ref() {
+                    continue;
+                }
+                by_id.entry(id.clone()).or_insert(GuestItem {
+                    guest_name: label(&l, "guest_name"),
+                    guest_id: id.clone(),
+                    project_id,
+                    project_name: label(&l, "project_name"),
+                });
+            }
+            let mut v: Vec<GuestItem> = by_id.into_values().collect();
+            v.sort();
+            json!({"kind": "instance", "guests": v})
+        }
+        Kind::Physical => {
+            let mut by_id: BTreeMap<String, HostItem> = BTreeMap::new();
+            for l in found {
+                let id = l
+                    .get("compute_node_id")
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| l.get("hostname"))
+                    .cloned();
+                let Some(id) = id else { continue };
+                by_id.entry(id.clone()).or_insert(HostItem {
+                    hostname: label(&l, "hostname"),
+                    compute_node_id: label(&l, "compute_node_id"),
+                    region: label(&l, "region"),
+                });
+            }
+            let mut v: Vec<HostItem> = by_id.into_values().collect();
+            v.sort();
+            json!({"kind": "physical", "hosts": v})
+        }
+    };
     Ok(Json(out))
 }
 
 #[derive(Deserialize)]
-struct SeriesQuery {
-    kind: Kind,
+struct PanelQuery {
+    dashboard: String,
     panel: String,
+    project_id: Option<String>,
     guest_id: Option<String>,
     compute_node_id: Option<String>,
-    project_id: Option<String>,
+    hostname: Option<String>,
     start: Option<i64>,
     end: Option<i64>,
 }
 
 #[derive(Serialize)]
 struct OutSeries {
-    /// Query name plus the legend labels, e.g. "read vda".
     name: String,
-    query: &'static str,
     labels: Labels,
     values: Vec<(f64, f64)>,
 }
 
-/// The series of one chart.
-async fn series(
-    Ext(clouds): Ext<Clouds>,
-    ctx: RequestContext,
-    Query(q): Query<SeriesQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let a = Access::new(&clouds, &ctx)?;
-    let panel = panels::find(q.kind, &q.panel).ok_or_else(|| {
-        err(
-            StatusCode::NOT_FOUND,
-            format!("unknown chart {:?}", q.panel),
-        )
-    })?;
-    let w = window(now(), q.start, q.end, a.max_range_days())?;
+#[derive(Serialize)]
+struct OutQuery {
+    #[serde(rename = "type")]
+    chart: ChartType,
+    unit: dashboards::Unit,
+    series: Vec<OutSeries>,
+}
+
+/// The dashboard's own `variables` (their names never clash with the built-in ones).
+fn own_vars(d: &Dashboard) -> HashMap<&str, String> {
+    d.variables
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.clone()))
+        .collect()
+}
+
+/// The variables of one panel request.
+fn panel_vars<'a>(
+    a: &Access,
+    d: &'a Dashboard,
+    p: &Panel,
+    q: &PanelQuery,
+    w: &Window,
+) -> Result<HashMap<&'a str, String>, ApiError> {
+    let needs = |v: &str| p.vars.contains(v);
     let required = |v: &Option<String>, name: &str| {
         v.as_deref()
             .filter(|s| !s.is_empty())
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("{name} is required")))
             .and_then(id_param)
     };
-
-    let (sel, node, project) = match q.kind {
-        Kind::Guest => {
-            let mut sel = a
-                .base(Some(Monitor::Cloud))
-                .with("guest_id", required(&q.guest_id, "guest_id")?);
-            if let Some(p) = a.project(q.project_id.as_deref())? {
-                sel = sel.with("project_id", p);
+    let mut vars = own_vars(d);
+    vars.extend([
+        ("region", a.region.clone()),
+        ("__interval", format!("{}s", w.step)),
+        (
+            "__rate_interval",
+            format!(
+                "{}s",
+                w.step.max(a.cloud.settings.rate_window_seconds as i64)
+            ),
+        ),
+        ("__range", format!("{}s", w.end - w.start)),
+    ]);
+    match d.kind {
+        Kind::Instance => {
+            // Every instance query uses $project_id (checked when the files are loaded).
+            let project = a
+                .project(q.project_id.as_deref())?
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "project_id is required"))?;
+            vars.insert("project_id", project);
+            if needs("guest_id") {
+                vars.insert("guest_id", required(&q.guest_id, "guest_id")?);
             }
-            (sel, None, None)
         }
-        Kind::Host => {
-            a.require_admin()?;
-            let id = required(&q.compute_node_id, "compute_node_id")?;
-            (
-                a.base(Some(Monitor::Physical))
-                    .with("compute_node_id", id.clone()),
-                Some(a.base(None).with("compute_node_id", id)),
-                None,
-            )
-        }
-        Kind::Project => {
-            let p = match a.project(q.project_id.as_deref())? {
-                Some(p) => p,
-                None => return Err(err(StatusCode::BAD_REQUEST, "project_id is required")),
-            };
-            (
-                Matchers::default(),
-                None,
-                Some(a.base(None).with("project_id", p)),
-            )
-        }
-    };
-
-    let rate_window = w.step.max(a.cloud.settings.rate_window_seconds as i64);
-    let mut out: Vec<OutSeries> = Vec::new();
-    for query in panel.queries {
-        let expr = panels::render(
-            query.expr,
-            &sel,
-            node.as_ref(),
-            project.as_ref(),
-            rate_window,
-        );
-        let mut got = a
-            .cloud
-            .prom
-            .query_range(&expr, w.start, w.end, w.step)
-            .await?;
-        got.sort_by(|x, y| x.labels.cmp(&y.labels));
-        for s in got {
-            let labels: Labels = query
-                .legend
-                .iter()
-                .filter_map(|l| s.labels.get(*l).map(|v| (l.to_string(), v.clone())))
-                .collect();
-            let name = std::iter::once(query.name.to_owned())
-                .chain(labels.values().cloned())
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push(OutSeries {
-                name,
-                query: query.name,
-                labels,
-                values: s.values,
-            });
+        Kind::Physical => {
+            if needs("compute_node_id") {
+                vars.insert(
+                    "compute_node_id",
+                    required(&q.compute_node_id, "compute_node_id")?,
+                );
+            }
+            if needs("hostname") {
+                vars.insert("hostname", required(&q.hostname, "hostname")?);
+            }
         }
     }
-    let hidden = keep_loudest(&mut out, MAX_SERIES);
+    Ok(vars)
+}
+
+/// Series names: the legend template, or the labels that tell the series apart.
+fn name_series(legend: Option<&str>, fallback: &str, series: &[prom::Series]) -> Vec<String> {
+    if let Some(t) = legend {
+        return series
+            .iter()
+            .map(|s| {
+                let mut out = String::new();
+                let mut rest = t;
+                while let Some(i) = rest.find("{{") {
+                    out.push_str(&rest[..i]);
+                    match rest[i + 2..].find("}}") {
+                        Some(j) => {
+                            let key = rest[i + 2..i + 2 + j].trim();
+                            out.push_str(s.labels.get(key).map_or("", String::as_str));
+                            rest = &rest[i + 4 + j..];
+                        }
+                        None => {
+                            out.push_str(&rest[i..]);
+                            rest = "";
+                        }
+                    }
+                }
+                out.push_str(rest);
+                out
+            })
+            .collect();
+    }
+    let keys: BTreeSet<&String> = series.iter().flat_map(|s| s.labels.keys()).collect();
+    let varying: Vec<&String> = keys
+        .into_iter()
+        .filter(|k| {
+            let first = series[0].labels.get(*k);
+            series.iter().any(|s| s.labels.get(*k) != first)
+        })
+        .collect();
+    series
+        .iter()
+        .map(|s| {
+            let parts: Vec<&str> = varying
+                .iter()
+                .filter_map(|k| s.labels.get(*k).map(String::as_str))
+                .collect();
+            if parts.is_empty() {
+                fallback.to_owned()
+            } else {
+                parts.join(" ")
+            }
+        })
+        .collect()
+}
+
+/// The data of one panel: a range query per time series, an instant query (at the end of the
+/// range) per stat, gauge or pie chart.
+async fn query(
+    Ext(clouds): Ext<Clouds>,
+    ctx: RequestContext,
+    Query(q): Query<PanelQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let a = Access::new(&clouds, &ctx)?;
+    let cat = a.cloud.panels.get();
+    let d = a.dashboard(&cat, &q.dashboard)?;
+    let p = d.panels.iter().find(|p| p.name == q.panel).ok_or_else(|| {
+        err(
+            StatusCode::NOT_FOUND,
+            format!("unknown panel {:?}", q.panel),
+        )
+    })?;
+    let w = window(now(), q.start, q.end, a.max_range_days())?;
+    let vars = panel_vars(&a, d, p, &q, &w)?;
+    let at = w.end.min(now());
+
+    let mut results = Vec::new();
+    let mut hidden = 0;
+    for (i, query) in p.queries.iter().enumerate() {
+        let expr = dashboards::render(&query.expr, &vars);
+        let mut got = match query.chart {
+            ChartType::TimeSeries => {
+                a.cloud
+                    .prom
+                    .query_range(&expr, w.start, w.end, w.step)
+                    .await?
+            }
+            _ => a.cloud.prom.query(&expr, at).await?,
+        };
+        got.retain(|s| !s.values.is_empty());
+        got.sort_by(|x, y| x.labels.cmp(&y.labels));
+        let fallback = if p.queries.len() == 1 {
+            p.title.clone()
+        } else {
+            format!("Query {}", (b'A' + (i % 26) as u8) as char)
+        };
+        let names = name_series(query.legend.as_deref(), &fallback, &got);
+        let mut series: Vec<OutSeries> = got
+            .into_iter()
+            .zip(names)
+            .map(|(s, name)| OutSeries {
+                name,
+                labels: s.labels,
+                values: s.values,
+            })
+            .collect();
+        if query.chart == ChartType::TimeSeries {
+            hidden += keep_loudest(&mut series, MAX_SERIES);
+        }
+        results.push(OutQuery {
+            chart: query.chart,
+            unit: query.unit,
+            series,
+        });
+    }
     Ok(Json(json!({
-        "panel": panel,
         "start": w.start,
         "end": w.end,
         "step": w.step,
-        "series": out,
+        "results": results,
         "hidden": hidden,
     })))
 }
@@ -660,10 +700,30 @@ mod tests {
     }
 
     #[test]
+    fn legends() {
+        let s = |pairs: &[(&str, &str)]| prom::Series {
+            labels: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            values: vec![(0.0, 1.0)],
+        };
+        let two = [
+            s(&[("device", "vda"), ("guest_name", "web")]),
+            s(&[("device", "vdb"), ("guest_name", "web")]),
+        ];
+        assert_eq!(name_series(None, "x", &two), ["vda", "vdb"]);
+        assert_eq!(
+            name_series(Some("write-{{device}} {{nope}}"), "x", &two),
+            ["write-vda ", "write-vdb "]
+        );
+        assert_eq!(name_series(None, "CPU", &[s(&[])]), ["CPU"]);
+    }
+
+    #[test]
     fn keeps_loudest_in_order() {
         let s = |name: &str, v: f64| OutSeries {
             name: name.into(),
-            query: "q",
             labels: Labels::new(),
             values: vec![(0.0, v)],
         };

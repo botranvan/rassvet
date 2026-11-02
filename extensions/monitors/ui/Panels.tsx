@@ -1,49 +1,129 @@
-/** The chart grid of one target (instance, physical server or project) and the time range bar. */
+/** The panel grid of a dashboard for one target (or the overview) and the time range bar. */
 import { useEffect, useState } from "react";
-import { Button, Card, ErrorNotice, Field, Icon, Input, Picker, tr } from "@rassvet/sdk";
-import { type Kind, type Panel, type Range, type Target, usePanels, useSeries } from "./api";
+import { Button, Card, ErrorNotice, Field, Icon, Input, Picker, cn, tr } from "@rassvet/sdk";
+import { type ChartType, type Dashboard, type Panel, type Range, type Series, type Target, type Unit, usePanelData } from "./api";
 import { Chart } from "./Chart";
 import { type RangeSpec, formatSpec, fromLocalInput, presetsFor, toLocalInput } from "./range";
+import { Gauges, Pie, Stats } from "./Viz";
 
-export function PanelGrid({ target, range }: { target: Target; range: Range }) {
-  const panels = usePanels(target.kind);
-  if (panels.error) return <ErrorNotice error={panels.error} />;
-  if (!panels.data) return <p className="text-sm text-muted">{tr("Loading…")}</p>;
+export function PanelGrid({
+  dashboard,
+  panels,
+  target,
+  range,
+}: {
+  dashboard: string;
+  panels: Panel[];
+  target: Target;
+  range: Range;
+}) {
+  if (!panels.length) return <p className="text-sm text-muted">{tr("This dashboard has no panels for this view.")}</p>;
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      {panels.data.map((p) => (
-        <PanelCard key={`${p.kind}:${p.id}`} panel={p} target={target} range={range} />
+      {panels.map((p) => (
+        <PanelCard key={p.name} dashboard={dashboard} panel={p} target={target} range={range} />
       ))}
     </div>
   );
 }
 
-function PanelCard({ panel, target, range }: { panel: Panel; target: Target; range: Range }) {
-  const q = useSeries(target, panel.id, range, false);
-  const series = (q.data?.series ?? []).map((s) => ({
-    ...s,
-    name: [tr(s.query), ...Object.values(s.labels)].join(" "),
-  }));
+/** Single values first, then the time series chart, then pie charts. */
+const ORDER: ChartType[] = ["stat", "gauge", "time_series", "pie_chart"];
+
+/** 0-1 values are drawn as percentages. */
+function normalize(unit: Unit, series: Series[]): [Unit, Series[]] {
+  if (unit !== "percent_unit") return [unit, series];
+  return ["percent", series.map((s) => ({ ...s, values: s.values.map(([t, v]) => [t, v * 100] as [number, number]) }))];
+}
+
+/** One block per run of queries of the same type and unit (all time series share one chart). */
+interface Block {
+  type: ChartType;
+  unit: Unit;
+  series: Series[];
+}
+
+function blocks(panel: Panel, results: { type: ChartType; unit: Unit; series: Series[] }[]): Block[] {
+  const out: Block[] = [];
+  for (const type of ORDER) {
+    for (const r of results.filter((r) => r.type === type)) {
+      const [unit, series] = normalize(type === "time_series" ? panel.unit : r.unit, r.series);
+      const prev = out.at(-1);
+      if (prev && prev.type === type && (type === "time_series" || prev.unit === unit)) prev.series.push(...series);
+      else out.push({ type, unit, series: [...series] });
+    }
+  }
+  return out.filter((b) => b.series.length);
+}
+
+function PanelCard({ dashboard, panel, target, range }: { dashboard: string; panel: Panel; target: Target; range: Range }) {
+  const q = usePanelData(dashboard, panel.name, target, range);
+  const list = q.data ? blocks(panel, q.data.results) : [];
+  const pct = panel.unit === "percent_unit" ? 100 : 1;
+
   return (
     <Card
-      title={tr(panel.title)}
+      className={cn(panel.width === "full" && "xl:col-span-2")}
+      title={<span title={panel.description}>{panel.title}</span>}
       actions={q.isFetching ? <Icon name="refresh" className="size-3.5 animate-spin text-muted" /> : undefined}
     >
+      {panel.description && <p className="-mt-1 mb-3 text-xs text-muted">{panel.description}</p>}
       {q.error ? (
         <ErrorNotice error={q.error} />
       ) : !q.data ? (
         <div className="h-[190px] animate-pulse rounded-md bg-surface" />
-      ) : series.length === 0 ? (
+      ) : list.length === 0 ? (
         <p className="flex h-[120px] items-center justify-center text-sm text-muted">{tr("No data in this time range")}</p>
       ) : (
-        <>
-          <Chart series={series} unit={panel.unit} range={{ start: q.data.start, end: q.data.end }} step={q.data.step} />
-          {q.data.hidden > 0 && (
-            <p className="mt-2 text-xs text-muted">{tr("{n} quieter series not shown", { n: q.data.hidden })}</p>
-          )}
-        </>
+        <div className="space-y-4">
+          {list.map((b, i) => {
+            switch (b.type) {
+              case "stat":
+                return <Stats key={i} series={b.series} unit={b.unit} />;
+              case "gauge":
+                return (
+                  <Gauges
+                    key={i}
+                    series={b.series}
+                    unit={b.unit}
+                    min={panel.min == null ? undefined : panel.min * pct}
+                    max={panel.max == null ? undefined : panel.max * pct}
+                  />
+                );
+              case "pie_chart":
+                return <Pie key={i} series={b.series} unit={b.unit} />;
+              default:
+                return (
+                  <div key={i}>
+                    <Chart series={b.series} unit={b.unit} range={{ start: q.data!.start, end: q.data!.end }} step={q.data!.step} />
+                    {q.data!.hidden > 0 && (
+                      <p className="mt-2 text-xs text-muted">{tr("{n} quieter series not shown", { n: q.data!.hidden })}</p>
+                    )}
+                  </div>
+                );
+            }
+          })}
+        </div>
       )}
     </Card>
+  );
+}
+
+/** Picks one of several dashboards of a kind (hidden when there is only one). */
+export function DashboardPicker({ list, value, onChange }: { list: Dashboard[]; value: string; onChange: (id: string) => void }) {
+  if (list.length < 2) return null;
+  return (
+    <Field label={tr("Dashboard")}>
+      {(id) => (
+        <Picker
+          id={id}
+          className="w-56"
+          value={value}
+          onChange={onChange}
+          options={list.map((d) => ({ value: d.id, label: d.title, description: d.title !== d.id ? d.id : undefined, icon: "layout-dashboard" }))}
+        />
+      )}
+    </Field>
   );
 }
 
@@ -132,4 +212,3 @@ export function useNow() {
   return [now, () => setNow(Date.now() / 1000)] as const;
 }
 
-export type { Kind };

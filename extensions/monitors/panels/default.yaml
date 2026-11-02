@@ -1,0 +1,304 @@
+# Built-in dashboards of the Rassvet Monitors extension.
+#
+# Copy this file into your monitor_panels_paths directory (e.g. /etc/rassvet/monitor-panels/)
+# and change it, or add files next to it: entries with the same `dashboard` key are merged into
+# one page. The format is documented in docs/admin/11-monitoring.md.
+#
+# Metric names follow Telegraf's outputs.prometheus_client (<measurement>_<field>):
+#   instances: the libvirt exec script (libvirt_*, libvirt_disk_*, libvirt_net_*)
+#   physical servers: Telegraf's cpu, mem, system, disk, diskio and net inputs
+#   Nova's view: the OpenStack database exec script (openstack_*)
+#
+# A dashboard can define its own variables and use them in queries, e.g. to match only the
+# series of one Telegraf setup:
+#
+#   - dashboard: cloud.*
+#     variables:
+#       - monitor: cloud-infras
+#       - db: public-infras
+#     discover: '{monitor="$monitor",db="$db",project_id=~"$project_id",guest_id!=""}'
+#     panels:
+#       - name: cpu
+#         queries:
+#           - query: 'sum(rate(libvirt_cpu_time{monitor="$monitor",db="$db",project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))'
+
+# --------------------------------------------------------------------------- instances
+- dashboard: cloud.*
+  title: Instances
+  kind: instance
+  panels:
+    # Shown when an instance is picked (the queries use $guest_id).
+    - name: cpu
+      title: CPU usage
+      unit: percent
+      queries:
+        - query: >-
+            100 * sum(rate(libvirt_cpu_time{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            / max(libvirt_cpu_number{project_id="$project_id",guest_id="$guest_id"})
+          legend: CPU
+
+    - name: memory_now
+      title: Memory in use now
+      unit: percent
+      min: 0
+      max: 100
+      queries:
+        - query: max(libvirt_memory_used_percent{project_id="$project_id",guest_id="$guest_id"})
+          type: gauge
+          legend: used
+
+    - name: memory
+      title: Memory
+      unit: bytes
+      queries:
+        - query: 1024 * max(libvirt_memory_used{project_id="$project_id",guest_id="$guest_id"})
+          legend: used
+        - query: 1024 * max(libvirt_memory_resident{project_id="$project_id",guest_id="$guest_id"})
+          legend: resident
+        - query: 1024 * max(libvirt_memory_total{project_id="$project_id",guest_id="$guest_id"})
+          legend: total
+
+    - name: disk_bytes
+      title: Disk throughput
+      unit: bytes_per_sec
+      queries:
+        - query: sum by (device) (rate(libvirt_disk_read_bytes{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "read {{device}}"
+        - query: sum by (device) (rate(libvirt_disk_write_bytes{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "write {{device}}"
+
+    - name: disk_iops
+      title: Disk IOPS
+      unit: ops_per_sec
+      queries:
+        - query: sum by (device) (rate(libvirt_disk_read_requests{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "read {{device}}"
+        - query: sum by (device) (rate(libvirt_disk_write_requests{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "write {{device}}"
+
+    - name: disk_latency
+      title: Disk latency
+      unit: seconds
+      queries:
+        - query: >-
+            sum by (device) (rate(libvirt_disk_rd_total_times{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            / sum by (device) (rate(libvirt_disk_read_requests{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "read {{device}}"
+        - query: >-
+            sum by (device) (rate(libvirt_disk_wr_total_times{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval])) / 1e9
+            / sum by (device) (rate(libvirt_disk_write_requests{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "write {{device}}"
+
+    - name: disk_space
+      title: Disk allocation
+      unit: bytes
+      queries:
+        - query: max by (device) (libvirt_disk_allocation{project_id="$project_id",guest_id="$guest_id"})
+          legend: "allocated {{device}}"
+        - query: max by (device) (libvirt_disk_capacity{project_id="$project_id",guest_id="$guest_id"})
+          legend: "capacity {{device}}"
+
+    - name: net_bits
+      title: Network traffic
+      unit: bits_per_sec
+      queries:
+        - query: 8 * sum by (device) (rate(libvirt_net_read_bytes{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "received {{device}}"
+        - query: 8 * sum by (device) (rate(libvirt_net_write_bytes{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "sent {{device}}"
+
+    - name: net_packets
+      title: Network packets
+      unit: packets_per_sec
+      queries:
+        - query: sum by (device) (rate(libvirt_net_read_packets{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "received {{device}}"
+        - query: sum by (device) (rate(libvirt_net_write_packets{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: "sent {{device}}"
+
+    - name: net_errors
+      title: Network errors and drops
+      unit: packets_per_sec
+      queries:
+        - query: sum(rate(libvirt_net_read_errors{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: receive errors
+        - query: sum(rate(libvirt_net_write_errors{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: send errors
+        - query: sum(rate(libvirt_net_read_drops{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: receive drops
+        - query: sum(rate(libvirt_net_write_drops{project_id="$project_id",guest_id="$guest_id"}[$__rate_interval]))
+          legend: send drops
+
+    # Shown when no instance is picked: the whole project (no $guest_id).
+    - name: project_counts
+      title: Project now
+      unit: count
+      width: full
+      queries:
+        - query: count(count by (guest_id) (libvirt_cpu_time{project_id="$project_id"}))
+          type: stat
+          legend: running instances
+        - query: sum(max by (guest_id) (libvirt_cpu_number{project_id="$project_id"}))
+          type: stat
+          legend: vCPUs
+        - query: 1024 * sum(max by (guest_id) (libvirt_memory_total{project_id="$project_id"}))
+          type: stat
+          unit: bytes
+          legend: memory
+
+    - name: top_cpu
+      title: CPU usage of the busiest instances
+      unit: percent
+      queries:
+        - query: >-
+            topk(8, 100 * sum by (guest_name) (rate(libvirt_cpu_time{project_id="$project_id"}[$__rate_interval])) / 1e9
+            / max by (guest_name) (libvirt_cpu_number{project_id="$project_id"}))
+          legend: "{{guest_name}}"
+
+    - name: memory_share
+      title: Memory by instance
+      unit: bytes
+      queries:
+        - query: 1024 * sum by (guest_name) (libvirt_memory_total{project_id="$project_id"})
+          type: pie_chart
+          legend: "{{guest_name}}"
+
+# --------------------------------------------------------------------------- physical servers
+- dashboard: physical.*
+  title: Physical servers
+  kind: physical
+  panels:
+    # Shown when a server is picked (the queries use $compute_node_id).
+    - name: cpu
+      title: CPU usage
+      unit: percent
+      queries:
+        - query: 100 - avg(cpu_usage_idle{compute_node_id="$compute_node_id",cpu="cpu-total"})
+          legend: used
+        - query: avg(cpu_usage_user{compute_node_id="$compute_node_id",cpu="cpu-total"})
+          legend: user
+        - query: avg(cpu_usage_system{compute_node_id="$compute_node_id",cpu="cpu-total"})
+          legend: system
+        - query: avg(cpu_usage_iowait{compute_node_id="$compute_node_id",cpu="cpu-total"})
+          legend: iowait
+
+    - name: memory_now
+      title: Memory in use now
+      unit: percent
+      min: 0
+      max: 100
+      queries:
+        - query: max(mem_used_percent{compute_node_id="$compute_node_id"})
+          type: gauge
+          legend: used
+
+    - name: load
+      title: Load average
+      unit: count
+      queries:
+        - query: max(system_load1{compute_node_id="$compute_node_id"})
+          legend: 1 min
+        - query: max(system_load5{compute_node_id="$compute_node_id"})
+          legend: 5 min
+        - query: max(system_load15{compute_node_id="$compute_node_id"})
+          legend: 15 min
+
+    - name: memory
+      title: Memory
+      unit: bytes
+      queries:
+        - query: max(mem_used{compute_node_id="$compute_node_id"})
+          legend: used
+        - query: max(mem_available{compute_node_id="$compute_node_id"})
+          legend: available
+        - query: max(mem_total{compute_node_id="$compute_node_id"})
+          legend: total
+
+    - name: disk_space
+      title: Disk space used
+      unit: percent
+      queries:
+        - query: max by (path) (disk_used_percent{compute_node_id="$compute_node_id"})
+          legend: "{{path}}"
+
+    - name: disk_bytes
+      title: Disk throughput
+      unit: bytes_per_sec
+      queries:
+        - query: sum by (name) (rate(diskio_read_bytes{compute_node_id="$compute_node_id"}[$__rate_interval]))
+          legend: "read {{name}}"
+        - query: sum by (name) (rate(diskio_write_bytes{compute_node_id="$compute_node_id"}[$__rate_interval]))
+          legend: "write {{name}}"
+
+    - name: net_bits
+      title: Network traffic
+      unit: bits_per_sec
+      queries:
+        # Instance and virtual network interfaces are left out.
+        - query: >-
+            8 * sum by (interface) (rate(net_bytes_recv{compute_node_id="$compute_node_id",
+            interface!~"lo|tap.*|qvo.*|qvb.*|qbr.*|qr-.*|qg-.*|vnet.*|veth.*|br-.*|ovs-system|vxlan.*|genev.*|docker.*|virbr.*"}[$__rate_interval]))
+          legend: "received {{interface}}"
+        - query: >-
+            8 * sum by (interface) (rate(net_bytes_sent{compute_node_id="$compute_node_id",
+            interface!~"lo|tap.*|qvo.*|qvb.*|qbr.*|qr-.*|qg-.*|vnet.*|veth.*|br-.*|ovs-system|vxlan.*|genev.*|docker.*|virbr.*"}[$__rate_interval]))
+          legend: "sent {{interface}}"
+
+    - name: nova_vcpus
+      title: Nova vCPUs
+      unit: count
+      queries:
+        - query: max(openstack_compute_node_usage_vcpus_used{compute_node_id="$compute_node_id"})
+          legend: used
+        - query: max(openstack_compute_node_usage_vcpus_total{compute_node_id="$compute_node_id"})
+          legend: total
+
+    - name: nova_memory
+      title: Nova memory
+      unit: bytes
+      queries:
+        - query: 1048576 * max(openstack_compute_node_usage_memory_mb_used{compute_node_id="$compute_node_id"})
+          legend: used
+        - query: 1048576 * max(openstack_compute_node_usage_memory_mb_total{compute_node_id="$compute_node_id"})
+          legend: total
+
+    - name: nova_instances
+      title: Running instances
+      unit: count
+      queries:
+        - query: max(openstack_compute_node_usage_running_vms{compute_node_id="$compute_node_id"})
+          legend: instances
+
+    # Shown when no server is picked: the whole fleet.
+    - name: fleet_now
+      title: Fleet now
+      unit: count
+      width: full
+      queries:
+        - query: count(count by (compute_node_id) (cpu_usage_idle{cpu="cpu-total"}))
+          type: stat
+          legend: servers reporting
+        - query: sum(max by (compute_node_id) (openstack_compute_node_usage_running_vms))
+          type: stat
+          legend: running instances
+        - query: sum(max by (compute_node_id) (openstack_compute_node_usage_vcpus_used))
+          type: stat
+          legend: vCPUs used
+        - query: sum(max by (compute_node_id) (openstack_compute_node_usage_vcpus_total))
+          type: stat
+          legend: vCPUs offered
+
+    - name: fleet_cpu
+      title: CPU usage of the busiest servers
+      unit: percent
+      queries:
+        - query: topk(8, 100 - avg by (hostname) (cpu_usage_idle{cpu="cpu-total"}))
+          legend: "{{hostname}}"
+
+    - name: fleet_instances
+      title: Instances by server
+      unit: count
+      queries:
+        - query: max by (hostname) (openstack_compute_node_usage_running_vms)
+          type: pie_chart
+          legend: "{{hostname}}"

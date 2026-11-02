@@ -77,6 +77,9 @@ async fn get(url: String) -> (u16, Value) {
     (status, res.json().await.unwrap_or(Value::Null))
 }
 
+const CLOUD: &str = "cloud.%2A";
+const PHYSICAL: &str = "physical.%2A";
+
 #[tokio::test]
 async fn project_user_only_sees_own_project() {
     let prom = MockServer::start().await;
@@ -84,17 +87,15 @@ async fn project_user_only_sees_own_project() {
         .and(path("/api/v1/series"))
         .and(query_param(
             "match[]",
-            r#"libvirt_cpu_time{monitor=~"cloud.*",project_id="p1"}"#,
-        ))
-        .and(query_param(
-            "match[]",
-            r#"libvirt_memory_total{monitor=~"cloud.*",project_id="p1"}"#,
+            r#"{project_id=~"p1",guest_id!=""}"#,
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": [
+                {"__name__": "libvirt_memory_total", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras", "db": "public-infras"},
                 {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras"},
-                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras", "host": "other"},
+                // Never shown to a project user, even if Prometheus returned it.
+                {"__name__": "libvirt_cpu_time", "guest_id": "g2", "guest_name": "other", "project_id": "p2", "project_name": "x", "monitor": "cloud-infras"},
             ],
         })))
         .expect(1)
@@ -104,7 +105,7 @@ async fn project_user_only_sees_own_project() {
         .and(path("/api/v1/query_range"))
         .and(query_param_contains(
             "query",
-            r#"guest_id="g1",project_id="p1""#,
+            r#"project_id="p1",guest_id="g1""#,
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
@@ -117,38 +118,52 @@ async fn project_user_only_sees_own_project() {
         .await;
     let base = serve(&prom, false).await;
 
-    // Asking for another project changes nothing: the token's project is matched.
-    let (status, got) = get(format!("{base}/guests?project_id=p2")).await;
+    let (status, got) = get(format!("{base}/targets?dashboard={CLOUD}")).await;
     assert_eq!(status, 200, "{got}");
     assert_eq!(
-        got,
+        got["guests"],
         json!([{"guest_name": "web", "guest_id": "g1", "project_id": "p1", "project_name": "demo"}])
     );
 
+    // Asking for another project changes nothing: $project_id is the token's project.
     let (status, got) = get(format!(
-        "{base}/series?kind=guest&panel=cpu&guest_id=g1&project_id=p2"
+        "{base}/query?dashboard={CLOUD}&panel=cpu&guest_id=g1&project_id=p2"
     ))
     .await;
     assert_eq!(status, 200, "{got}");
-    assert_eq!(got["series"][0]["values"], json!([[1.0, 12.5]]));
-    assert_eq!(got["hidden"], 0);
+    assert_eq!(got["results"][0]["type"], "time_series");
+    assert_eq!(
+        got["results"][0]["series"][0]["values"],
+        json!([[1.0, 12.5]])
+    );
+    assert_eq!(got["results"][0]["series"][0]["name"], "CPU");
 
     let (status, info) = get(format!("{base}/info")).await;
     assert_eq!(status, 200);
     assert_eq!(info["admin"], false);
     assert_eq!(info["max_range_days"], 60);
+
+    let (_, list) = get(format!("{base}/dashboards?kind=instance")).await;
+    assert_eq!(list[0]["id"], "cloud.*");
+    assert!(list[0]["panels"][0].get("queries").is_some());
+    assert!(
+        !list.to_string().contains("libvirt_"),
+        "PromQL must not be sent"
+    );
 }
 
 #[tokio::test]
 async fn project_user_gets_no_physical_servers_or_long_ranges() {
     let prom = MockServer::start().await;
     let base = serve(&prom, false).await;
-    assert_eq!(get(format!("{base}/hosts")).await.0, 403);
-    assert_eq!(get(format!("{base}/projects")).await.0, 403);
-    assert_eq!(get(format!("{base}/panels?kind=host")).await.0, 403);
+    assert_eq!(get(format!("{base}/dashboards?kind=physical")).await.0, 403);
+    assert_eq!(
+        get(format!("{base}/targets?dashboard={PHYSICAL}")).await.0,
+        403
+    );
     assert_eq!(
         get(format!(
-            "{base}/series?kind=host&panel=cpu&compute_node_id=n1"
+            "{base}/query?dashboard={PHYSICAL}&panel=cpu&compute_node_id=n1"
         ))
         .await
         .0,
@@ -156,7 +171,7 @@ async fn project_user_gets_no_physical_servers_or_long_ranges() {
     );
     let now = chrono::Utc::now().timestamp();
     let (status, body) = get(format!(
-        "{base}/series?kind=guest&panel=cpu&guest_id=g1&start={}",
+        "{base}/query?dashboard={CLOUD}&panel=cpu&guest_id=g1&start={}",
         now - 61 * 86400
     ))
     .await;
@@ -168,10 +183,24 @@ async fn project_user_gets_no_physical_servers_or_long_ranges() {
             .contains("60 days")
     );
     assert_eq!(
-        get(format!("{base}/series?kind=guest&panel=cpu&guest_id=a%22b"))
+        get(format!(
+            "{base}/query?dashboard={CLOUD}&panel=cpu&guest_id=a%22b"
+        ))
+        .await
+        .0,
+        400
+    );
+    assert_eq!(
+        get(format!("{base}/query?dashboard={CLOUD}&panel=cpu"))
             .await
             .0,
         400
+    );
+    assert_eq!(
+        get(format!("{base}/query?dashboard=nope&panel=cpu"))
+            .await
+            .0,
+        404
     );
     assert!(prom.received_requests().await.unwrap().is_empty());
 }
@@ -183,7 +212,7 @@ async fn admin_sees_physical_servers_and_a_year() {
         .and(path("/api/v1/series"))
         .and(query_param(
             "match[]",
-            r#"cpu_usage_idle{monitor=~"physical.*",cpu="cpu-total"}"#,
+            r#"{compute_node_id!=""}"#,
         ))
         .and(wiremock::matchers::header("authorization", "Bearer secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -214,20 +243,20 @@ async fn admin_sees_physical_servers_and_a_year() {
         .await;
     let base = serve(&prom, true).await;
 
-    let (status, got) = get(format!("{base}/hosts")).await;
+    let (status, got) = get(format!("{base}/targets?dashboard={PHYSICAL}")).await;
     assert_eq!(status, 200, "{got}");
     assert_eq!(
-        got,
+        got["hosts"],
         json!([{"hostname": "compute-1", "compute_node_id": "n1", "region": "RegionOne"}])
     );
 
     let now = chrono::Utc::now().timestamp();
     let (status, body) = get(format!(
-        "{base}/series?kind=host&panel=nova_vcpus&compute_node_id=n1&start={}",
+        "{base}/query?dashboard={PHYSICAL}&panel=nova_vcpus&compute_node_id=n1&start={}",
         now - 364 * 86400
     ))
     .await;
-    // The second query of the chart failed: the error of Prometheus is passed on.
+    // The second query of the panel failed: the error of Prometheus is passed on.
     assert_eq!(status, 502);
     assert_eq!(body["error"]["message"], "Prometheus: boom");
 }
@@ -242,23 +271,80 @@ fn only_available_in_configured_clouds() {
 }
 
 #[tokio::test]
-async fn monitor_label_pattern_is_configurable() {
+async fn custom_panel_files() {
+    let dir = std::env::temp_dir().join(format!("rassvet-monitors-it-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("infras.yaml"),
+        r#"
+- dashboard: cloud-infras
+  title: Infrastructure VMs
+  variables:
+    - monitor: cloud-infras
+    - db: public-infras
+  discover: 'libvirt_memory_total{db="$db",monitor="$monitor",project_id=~"$project_id"}'
+  panels:
+    - name: mem
+      description: Memory Monitors
+      unit: bytes
+      queries:
+        - query: 'sum(libvirt_memory_total{db="$db",project_id="$project_id",guest_id="$guest_id"})'
+          type: stat
+          legend: total
+        - query: 'libvirt_memory_used{db="$db",project_id="$project_id",guest_id="$guest_id"}'
+          type: pie_chart
+"#,
+    )
+    .unwrap();
     let prom = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/series"))
         .and(query_param(
             "match[]",
-            r#"libvirt_memory_total{monitor=~"cloud-infras|cloud",project_id="p1"}"#,
+            r#"libvirt_memory_total{db="public-infras",monitor="cloud-infras",project_id=~".+"}"#,
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
-            "data": [{"__name__": "libvirt_memory_total", "guest_id": "006af7b5-4490-4157-b1ba-36d14409e120", "guest_name": "edge-fw-001", "project_id": "p1", "project_name": "ministryinc", "monitor": "cloud-infras", "region": "HaNoi", "db": "public-infras", "host": "han01osp01com05"}],
+            "data": [{"__name__": "libvirt_memory_total", "guest_id": "006af7b5-4490-4157-b1ba-36d14409e120", "guest_name": "edge-fw-001", "project_id": "25003f065dc8408c834b6ba52dbd812d", "project_name": "ministryinc", "monitor": "cloud-infras", "region": "HaNoi", "db": "public-infras", "host": "han01osp01com05"}],
         })))
         .expect(1)
         .mount(&prom)
         .await;
-    let base = serve_with(&prom, false, r#"cloud_monitor = "cloud-infras|cloud""#).await;
-    let (status, got) = get(format!("{base}/guests")).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/query"))
+        .and(query_param_contains(
+            "query",
+            r#"project_id="25003f065dc8408c834b6ba52dbd812d""#,
+        ))
+        // The dashboard's own variables are filled in the queries.
+        .and(query_param_contains("query", r#"db="public-infras""#))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": {"resultType": "vector", "result": [{"metric": {}, "value": [5.0, "4096"]}]},
+        })))
+        .expect(2)
+        .mount(&prom)
+        .await;
+    let paths = format!("monitor_panels_paths = \"{}\"", dir.display());
+    let base = serve_with(&prom, true, &paths).await;
+
+    let (_, list) = get(format!("{base}/dashboards?kind=instance")).await;
+    assert_eq!(list[0]["title"], "Infrastructure VMs");
+    assert_eq!(list[0]["panels"][0]["title"], "Memory Monitors");
+    let (status, got) = get(format!("{base}/targets?dashboard=cloud-infras")).await;
     assert_eq!(status, 200, "{got}");
-    assert_eq!(got[0]["guest_name"], "edge-fw-001");
+    assert_eq!(got["guests"][0]["guest_name"], "edge-fw-001");
+    let (status, got) = get(format!(
+        "{base}/query?dashboard=cloud-infras&panel=mem&project_id=25003f065dc8408c834b6ba52dbd812d&guest_id=006af7b5-4490-4157-b1ba-36d14409e120"
+    ))
+    .await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(got["results"][0]["type"], "stat");
+    assert_eq!(got["results"][0]["series"][0]["name"], "total");
+    assert_eq!(got["results"][1]["type"], "pie_chart");
+    assert_eq!(
+        got["results"][1]["series"][0]["values"],
+        json!([[5.0, 4096.0]])
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

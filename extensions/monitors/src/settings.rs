@@ -38,24 +38,10 @@ pub struct Settings {
     /// Smallest window of `rate()` for counters; at least 4× the scrape / Telegraf interval.
     #[serde(default = "d300")]
     pub rate_window_seconds: u64,
-    /// Also match `region="<the session's region>"` in every query (one Prometheus for
-    /// several regions). Off: only `project_id` scopes what a project user sees.
+    /// YAML files, or directories of `*.yaml` / `*.yml` files, defining the dashboards and
+    /// panels; a string or a list. Without it, the built-in `panels/default.yaml` is used.
     #[serde(default)]
-    pub region_filter: bool,
-    /// Regular expression the `monitor` label of instance metrics must match (whole value),
-    /// e.g. `cloud`, `cloud-infras`.
-    #[serde(default = "d_cloud")]
-    pub cloud_monitor: String,
-    /// Regular expression the `monitor` label of physical server metrics must match.
-    #[serde(default = "d_physical")]
-    pub physical_monitor: String,
-}
-
-fn d_cloud() -> String {
-    "cloud.*".into()
-}
-fn d_physical() -> String {
-    "physical.*".into()
+    pub monitor_panels_paths: Option<Paths>,
 }
 
 const fn d60() -> u32 {
@@ -69,6 +55,22 @@ const fn d30() -> u64 {
 }
 const fn d300() -> u64 {
     300
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Paths {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Paths {
+    pub fn list(&self) -> Vec<String> {
+        match self {
+            Paths::One(p) => vec![p.clone()],
+            Paths::Many(v) => v.clone(),
+        }
+    }
 }
 
 /// How rassvet authenticates to Prometheus.
@@ -102,13 +104,10 @@ impl Settings {
                 bail!("cloud '{cloud}': {name} must be 1-3650");
             }
         }
-        for (name, re) in [
-            ("cloud_monitor", &s.cloud_monitor),
-            ("physical_monitor", &s.physical_monitor),
-        ] {
-            if re.is_empty() || re.len() > 256 || re.contains('\n') {
-                bail!("cloud '{cloud}': {name} must be a one-line regular expression");
-            }
+        if let Some(p) = &s.monitor_panels_paths
+            && p.list().iter().all(|x| x.trim().is_empty())
+        {
+            bail!("cloud '{cloud}': monitor_panels_paths is empty");
         }
         if s.timeout_seconds == 0 || s.rate_window_seconds == 0 {
             bail!("cloud '{cloud}': timeout_seconds and rate_window_seconds must be > 0");
@@ -154,10 +153,27 @@ mod tests {
         let s = parse(r#"prometheus_url = "http://prom:9090""#).unwrap();
         assert_eq!(s.project_max_range_days, 60);
         assert_eq!(s.admin_max_range_days, 365);
-        assert!(!s.region_filter);
-        assert_eq!(s.cloud_monitor, "cloud.*");
-        assert_eq!(s.physical_monitor, "physical.*");
+        assert!(s.monitor_panels_paths.is_none());
         assert!(matches!(s.auth().unwrap(), Auth::None));
+    }
+
+    #[test]
+    fn panel_paths_one_or_many() {
+        let s = parse(
+            r#"prometheus_url = "http://p"
+monitor_panels_paths = "/etc/rassvet/monitor-panels""#,
+        )
+        .unwrap();
+        assert_eq!(
+            s.monitor_panels_paths.unwrap().list(),
+            ["/etc/rassvet/monitor-panels"]
+        );
+        let s = parse(
+            r#"prometheus_url = "http://p"
+monitor_panels_paths = ["/a", "/b/x.yaml"]"#,
+        )
+        .unwrap();
+        assert_eq!(s.monitor_panels_paths.unwrap().list().len(), 2);
     }
 
     #[test]

@@ -4771,6 +4771,19 @@ const vi: Record<string, string> = {
   "total": "tổng",
   "used": "đã dùng",
   "{n} quieter series not shown": "Ẩn {n} chuỗi số liệu ít biến động hơn",
+  "This instance has no metrics in this time range.": "Máy ảo này không có số liệu trong khoảng thời gian này.",
+  "This dashboard has no panels for this view.": "Dashboard này không có panel cho chế độ xem này.",
+  "No instance dashboard is defined in the panel files.": "Các tệp panel chưa định nghĩa dashboard máy ảo nào.",
+  "Dashboards of this project's instances, from the cloud's Prometheus. Pick an instance.": "Dashboard các máy ảo trong dự án này, lấy từ Prometheus của cloud. Chọn một máy ảo.",
+  "Total": "Tổng",
+  "Other": "Khác",
+  "Dashboards of the physical servers, from the cloud's Prometheus. Pick a server, or see the whole fleet.": "Dashboard máy chủ vật lý, lấy từ Prometheus của cloud. Chọn một máy chủ, hoặc xem toàn bộ.",
+  "Dashboard": "Dashboard",
+  "This server has no metrics in this time range.": "Máy chủ này không có số liệu trong khoảng thời gian này.",
+  "Dashboards of any project's instances, from the cloud's Prometheus. Pick a project, then an instance.": "Dashboard máy ảo của mọi dự án, lấy từ Prometheus của cloud. Chọn một dự án, rồi một máy ảo.",
+  "Project: {name}": "Dự án: {name}",
+  "No physical server dashboard is defined in the panel files.": "Các tệp panel chưa định nghĩa dashboard máy chủ vật lý nào.",
+  "Choose an instance to see its own panels.": "Chọn một máy ảo để xem các panel của nó.",
 };
 
 export default vi;

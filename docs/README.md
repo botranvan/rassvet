@@ -46,7 +46,7 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *D
 | 8 | [Cleanup across projects](admin/08-cleanup-all-projects.md) | find leftovers in every project |
 | 9 | [Kubernetes service](admin/09-kubernetes-service.md) | publish cluster templates, set cluster quotas, check the Magnum services |
 | 10 | [DNS service](admin/10-dns-service.md) | allow domains (TLDs, blacklists), set DNS quotas, TSIG keys, check the Designate services |
-| 11 | [Monitoring](admin/11-monitoring.md) | connect Prometheus and Telegraf, chart every project's instances and the physical servers |
+| 11 | [Monitoring](admin/11-monitoring.md) | connect Prometheus or VictoriaMetrics, define dashboards and panels in YAML, chart instances and physical servers |
 
 ## Features
 
@@ -127,8 +127,9 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *D
   (A, AAAA, CNAME, MX, TXT with automatic quoting, SRV, CAA, NS, PTR, SSHFP…), name servers to set at the
   registrar, zone file import and export, transfers to another project (request ID + key), shares with other
   projects (2023.1+), and reverse DNS (PTR) of floating IPs.
-- Instance monitors (Monitors extension, Prometheus + Telegraf): CPU, memory, disk and network charts of the
-  project's instances and the project's totals, with hover values and last / avg / max per series, up to 60 days back.
+- Instance monitors (Monitors extension, Prometheus / VictoriaMetrics + Telegraf): dashboards of the project's
+  instances and of the whole project (time series, stats, gauges, pie charts) defined by the operator in YAML
+  panel files, with hover values and last / avg / max per series, up to 60 days back.
 - Object storage (Swift API — OpenStack Swift or Ceph RGW): containers (public or private, storage policy,
   versioning, quotas, metadata), a file browser with folders, drag-and-drop uploads, downloads, properties,
   copy/move and temporary links. EC2 credentials give S3 tools (aws, s3cmd, rclone, boto3) access, with ready
@@ -184,8 +185,9 @@ Ceph RGW, *Load balancers* needs Octavia, *Kubernetes clusters* needs Magnum, *D
   project, usage and the state of the Magnum services.
 - DNS (Designate): zones of every project (create or import for another project, abandon), TLDs, blacklists,
   per-project DNS quotas, TSIG keys, pools and the state of the Designate services.
-- Monitoring (Monitors extension): charts of any project's instances (pick a project, then an instance) and of the
-  physical servers (CPU, load, memory, disks, network and Nova's vCPU / memory / instance counts), up to a year back.
+- Monitoring (Monitors extension): dashboards of any project's instances (pick a project, then an instance) and of
+  the physical servers (per server or the whole fleet), up to a year back. Dashboards and panels are PromQL
+  templates in YAML files (`monitor_panels_paths`), reloaded when they change.
 - Federation (SSO): identity providers (remote IDs, domain, authorization TTL) and their protocols (openid,
   saml2, mapped, x509), mappings edited as JSON with templates and validation, Keystone-to-Keystone service
   providers. Rassvet manages federation; signing in to Rassvet itself through SSO is not built yet.
