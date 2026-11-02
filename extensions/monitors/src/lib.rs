@@ -208,16 +208,34 @@ impl Access {
             .transpose()
     }
 
-    fn base(&self, monitor: Option<&str>) -> Matchers {
+    fn base(&self, monitor: Option<Monitor>) -> Matchers {
         let mut m = Matchers::default();
-        if let Some(mon) = monitor {
-            m = m.with("monitor", mon);
+        let s = &self.cloud.settings;
+        match monitor {
+            Some(Monitor::Cloud) => m = m.with_re("monitor", s.cloud_monitor.clone()),
+            Some(Monitor::Physical) => m = m.with_re("monitor", s.physical_monitor.clone()),
+            None => {}
         }
         if let Some(r) = &self.region {
             m = m.with("region", r.clone());
         }
         m
     }
+}
+
+/// Which `monitor` label values a selector matches (regexes from the settings).
+#[derive(Clone, Copy)]
+enum Monitor {
+    Cloud,
+    Physical,
+}
+
+/// Series that every monitored instance has: the instance pickers are built from these.
+fn guest_matchers(sel: &str) -> Vec<String> {
+    ["libvirt_cpu_time", "libvirt_memory_total"]
+        .iter()
+        .map(|m| format!("{m}{{{sel}}}"))
+        .collect()
 }
 
 fn id_param(v: &str) -> Result<String, ApiError> {
@@ -337,11 +355,11 @@ async fn projects(
     let a = Access::new(&clouds, &ctx)?;
     a.require_admin()?;
     let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let sel = a.base(Some("cloud")).render();
+    let sel = a.base(Some(Monitor::Cloud)).render();
     let found = a
         .cloud
         .prom
-        .series(&[format!("libvirt_cpu_time{{{sel}}}")], w.start, w.end)
+        .series(&guest_matchers(&sel), w.start, w.end)
         .await?;
     let mut by_id: BTreeMap<String, String> = BTreeMap::new();
     for l in found {
@@ -389,18 +407,14 @@ async fn guests(
 ) -> Result<Json<Vec<GuestItem>>, ApiError> {
     let a = Access::new(&clouds, &ctx)?;
     let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let mut sel = a.base(Some("cloud"));
+    let mut sel = a.base(Some(Monitor::Cloud));
     if let Some(p) = a.project(q.project_id.as_deref())? {
         sel = sel.with("project_id", p);
     }
     let found = a
         .cloud
         .prom
-        .series(
-            &[format!("libvirt_cpu_time{{{}}}", sel.render())],
-            w.start,
-            w.end,
-        )
+        .series(&guest_matchers(&sel.render()), w.start, w.end)
         .await?;
     let mut by_id: BTreeMap<String, GuestItem> = BTreeMap::new();
     for l in found {
@@ -438,7 +452,7 @@ async fn hosts(
     let a = Access::new(&clouds, &ctx)?;
     a.require_admin()?;
     let w = window(now(), q.start, q.end, a.max_range_days())?;
-    let sel = a.base(Some("physical")).render();
+    let sel = a.base(Some(Monitor::Physical)).render();
     // `up`-like metrics differ between setups; any CPU series of the server will do.
     let found = a
         .cloud
@@ -512,7 +526,7 @@ async fn series(
     let (sel, node, project) = match q.kind {
         Kind::Guest => {
             let mut sel = a
-                .base(Some("cloud"))
+                .base(Some(Monitor::Cloud))
                 .with("guest_id", required(&q.guest_id, "guest_id")?);
             if let Some(p) = a.project(q.project_id.as_deref())? {
                 sel = sel.with("project_id", p);
@@ -523,7 +537,8 @@ async fn series(
             a.require_admin()?;
             let id = required(&q.compute_node_id, "compute_node_id")?;
             (
-                a.base(Some("physical")).with("compute_node_id", id.clone()),
+                a.base(Some(Monitor::Physical))
+                    .with("compute_node_id", id.clone()),
                 Some(a.base(None).with("compute_node_id", id)),
                 None,
             )

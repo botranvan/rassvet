@@ -6,9 +6,9 @@
 //!
 //! Metric names follow the Telegraf `outputs.prometheus_client` naming (`<measurement>_<field>`):
 //! * instances: the libvirt exec script (`libvirt_*`, `libvirt_disk_*`, `libvirt_net_*`), labels
-//!   `monitor="cloud"`, `project_id`, `project_name`, `guest_id`, `guest_name`;
+//!   `monitor=~"cloud.*"` (e.g. `cloud`, `cloud-infras`; see `cloud_monitor`), `project_id`, `project_name`, `guest_id`, `guest_name`;
 //! * physical servers: Telegraf's `cpu`, `mem`, `system`, `disk`, `diskio`, `net` inputs, labels
-//!   `monitor="physical"`, `compute_node_id`, `hostname`;
+//!   `monitor=~"physical.*"` (see `physical_monitor`), `compute_node_id`, `hostname`;
 //! * Nova's view of a compute node and of a project: the OpenStack DB exec script
 //!   (`openstack_compute_node_usage_*` by `compute_node_id`, `openstack_project_usage_total_*`
 //!   by `project_id`).
@@ -455,18 +455,25 @@ pub fn of(kind: Kind) -> impl Iterator<Item = &'static Panel> {
 
 /// Label matchers, rendered as `a="x",b="y"` (to go inside `{…}`).
 #[derive(Debug, Default, Clone)]
-pub struct Matchers(Vec<(&'static str, String)>);
+pub struct Matchers(Vec<(&'static str, &'static str, String)>);
 
 impl Matchers {
+    /// `label="value"`
     pub fn with(mut self, label: &'static str, value: impl Into<String>) -> Self {
-        self.0.push((label, value.into()));
+        self.0.push((label, "=", value.into()));
+        self
+    }
+
+    /// `label=~"regex"` (anchored by PromQL: it must match the whole value).
+    pub fn with_re(mut self, label: &'static str, regex: impl Into<String>) -> Self {
+        self.0.push((label, "=~", regex.into()));
         self
     }
 
     pub fn render(&self) -> String {
         self.0
             .iter()
-            .map(|(l, v)| format!("{l}=\"{}\"", escape(v)))
+            .map(|(l, op, v)| format!("{l}{op}\"{}\"", escape(v)))
             .collect::<Vec<_>>()
             .join(",")
     }
@@ -539,7 +546,7 @@ mod tests {
     #[test]
     fn renders_escaped_matchers() {
         let sel = Matchers::default()
-            .with("monitor", "cloud")
+            .with_re("monitor", "cloud.*")
             .with("guest_id", r#"a"b\c"#);
         let got = render(
             "rate(x{$sel}[$w]) + y{$sel,cpu=\"t\"}",
@@ -550,7 +557,7 @@ mod tests {
         );
         assert_eq!(
             got,
-            r#"rate(x{monitor="cloud",guest_id="a\"b\\c"}[300s]) + y{monitor="cloud",guest_id="a\"b\\c",cpu="t"}"#
+            r#"rate(x{monitor=~"cloud.*",guest_id="a\"b\\c"}[300s]) + y{monitor=~"cloud.*",guest_id="a\"b\\c",cpu="t"}"#
         );
     }
 }

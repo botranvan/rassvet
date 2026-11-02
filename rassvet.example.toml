@@ -66,3 +66,6 @@ insecure_tls = false
 # # timeout_seconds = 30
 # # rate_window_seconds = 300     # smallest rate() window: ≥ 4 × the Telegraf interval
 # # region_filter = false         # also match region="<session region>" (one Prometheus, several regions)
+# # Regular expressions (whole value) for the `monitor` label, e.g. "cloud-infras":
+# # cloud_monitor = "cloud.*"       # instance (libvirt) metrics
+# # physical_monitor = "physical.*" # physical server metrics

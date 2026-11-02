@@ -29,7 +29,7 @@ Rassvet expects these labels, written by Telegraf:
 
 | Label | Value |
 |-------|-------|
-| `monitor` | `cloud` for instance metrics, `physical` for physical server metrics |
+| `monitor` | Starts with `cloud` for instance metrics (e.g. `cloud`, `cloud-infras`), with `physical` for physical server metrics. Change the patterns with `cloud_monitor` / `physical_monitor` |
 | `project_id`, `project_name` | The instance's Keystone project |
 | `guest_id`, `guest_name` | The Nova instance UUID and name |
 | `region` | The Keystone region name |
@@ -38,14 +38,14 @@ Rassvet expects these labels, written by Telegraf:
 It reads these metrics, named the way Telegraf's `outputs.prometheus_client` names them
 (`<measurement>_<field>`):
 
-- **Instances** (`monitor="cloud"`): the libvirt exec script. `libvirt_cpu_time` (ns),
+- **Instances** (`monitor=~"cloud.*"`): the libvirt exec script. `libvirt_cpu_time` (ns),
   `libvirt_cpu_number`, `libvirt_memory_used`, `libvirt_memory_resident`, `libvirt_memory_total` (KiB),
   `libvirt_memory_used_percent`, `libvirt_disk_*` (`read_bytes`, `write_bytes`, `read_requests`,
   `write_requests`, `rd_total_times`, `wr_total_times`, `allocation`, `capacity`, by `device`) and
   `libvirt_net_*` (`read_bytes`, `write_bytes`, `read_packets`, `write_packets`, `read_errors`,
-  `write_errors`, `read_drops`, `write_drops`, by `device`). The instance list comes from
-  `libvirt_cpu_time`.
-- **Physical servers** (`monitor="physical"`): Telegraf's `cpu` (`cpu_usage_*` with `cpu="cpu-total"`),
+  `write_errors`, `read_drops`, `write_drops`, by `device`). The instance and project lists come from
+  `libvirt_cpu_time` and `libvirt_memory_total`.
+- **Physical servers** (`monitor=~"physical.*"`): Telegraf's `cpu` (`cpu_usage_*` with `cpu="cpu-total"`),
   `system` (`system_load1/5/15`), `mem` (`mem_used`, `mem_available`, `mem_total`, `mem_used_percent`),
   `disk` (`disk_used_percent` by `path`), `diskio` (`diskio_read_bytes`, `diskio_write_bytes` by `name`)
   and `net` (`net_bytes_recv`, `net_bytes_sent` by `interface`) inputs. Instance and virtual network
@@ -109,7 +109,12 @@ admin_max_range_days = 365
 # timeout_seconds = 30
 # rate_window_seconds = 300   # smallest rate() window: at least 4 × the Telegraf interval
 # region_filter = false       # also match region="<session region>" when one Prometheus serves several regions
+# cloud_monitor = "cloud.*"           # regex for the monitor label of instance metrics (whole value)
+# physical_monitor = "physical.*"     # regex for the monitor label of physical server metrics
 ```
+
+For VictoriaMetrics, use the address of its Prometheus query API: `http://victoriametrics:8428` for a
+single node, or `http://vmselect:8481/select/<tenant>/prometheus` for a cluster.
 
 Prometheus is only called by the Rassvet server, so it doesn't have to be reachable from users' browsers.
 

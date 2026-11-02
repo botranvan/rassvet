@@ -14,9 +14,9 @@ use wiremock::{
     matchers::{method, path, query_param, query_param_contains},
 };
 
-fn monitors(prom: &MockServer) -> Monitors {
+fn monitors(prom: &MockServer, extra: &str) -> Monitors {
     let settings: toml::Value = toml::from_str(&format!(
-        "prometheus_url = \"{}\"\nbearer_token = \"secret\"",
+        "prometheus_url = \"{}\"\nbearer_token = \"secret\"\n{extra}",
         prom.uri()
     ))
     .unwrap();
@@ -24,6 +24,10 @@ fn monitors(prom: &MockServer) -> Monitors {
 }
 
 async fn serve(prom: &MockServer, is_admin: bool) -> String {
+    serve_with(prom, is_admin, "").await
+}
+
+async fn serve_with(prom: &MockServer, is_admin: bool, extra: &str) -> String {
     let token = Token {
         value: "tok".into(),
         expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
@@ -58,7 +62,9 @@ async fn serve(prom: &MockServer, is_admin: bool) -> String {
         region: Some("RegionOne".into()),
         interface: Interface::Public,
     };
-    let app = Router::new().merge(monitors(prom).router()).layer(Ext(ctx));
+    let app = Router::new()
+        .merge(monitors(prom, extra).router())
+        .layer(Ext(ctx));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { rassvet_ext_api::axum::serve(listener, app).await.unwrap() });
@@ -78,13 +84,17 @@ async fn project_user_only_sees_own_project() {
         .and(path("/api/v1/series"))
         .and(query_param(
             "match[]",
-            r#"libvirt_cpu_time{monitor="cloud",project_id="p1"}"#,
+            r#"libvirt_cpu_time{monitor=~"cloud.*",project_id="p1"}"#,
+        ))
+        .and(query_param(
+            "match[]",
+            r#"libvirt_memory_total{monitor=~"cloud.*",project_id="p1"}"#,
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
             "data": [
-                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud"},
-                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud", "host": "other"},
+                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras"},
+                {"__name__": "libvirt_cpu_time", "guest_id": "g1", "guest_name": "web", "project_id": "p1", "project_name": "demo", "monitor": "cloud-infras", "host": "other"},
             ],
         })))
         .expect(1)
@@ -173,7 +183,7 @@ async fn admin_sees_physical_servers_and_a_year() {
         .and(path("/api/v1/series"))
         .and(query_param(
             "match[]",
-            r#"cpu_usage_idle{monitor="physical",cpu="cpu-total"}"#,
+            r#"cpu_usage_idle{monitor=~"physical.*",cpu="cpu-total"}"#,
         ))
         .and(wiremock::matchers::header("authorization", "Bearer secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -226,7 +236,29 @@ async fn admin_sees_physical_servers_and_a_year() {
 fn only_available_in_configured_clouds() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let prom = rt.block_on(MockServer::start());
-    let m = monitors(&prom);
+    let m = monitors(&prom, "");
     assert!(m.is_available_in("c", &Catalog(vec![]), None));
     assert!(!m.is_available_in("other", &Catalog(vec![]), None));
+}
+
+#[tokio::test]
+async fn monitor_label_pattern_is_configurable() {
+    let prom = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/series"))
+        .and(query_param(
+            "match[]",
+            r#"libvirt_memory_total{monitor=~"cloud-infras|cloud",project_id="p1"}"#,
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "success",
+            "data": [{"__name__": "libvirt_memory_total", "guest_id": "006af7b5-4490-4157-b1ba-36d14409e120", "guest_name": "edge-fw-001", "project_id": "p1", "project_name": "ministryinc", "monitor": "cloud-infras", "region": "HaNoi", "db": "public-infras", "host": "han01osp01com05"}],
+        })))
+        .expect(1)
+        .mount(&prom)
+        .await;
+    let base = serve_with(&prom, false, r#"cloud_monitor = "cloud-infras|cloud""#).await;
+    let (status, got) = get(format!("{base}/guests")).await;
+    assert_eq!(status, 200, "{got}");
+    assert_eq!(got[0]["guest_name"], "edge-fw-001");
 }

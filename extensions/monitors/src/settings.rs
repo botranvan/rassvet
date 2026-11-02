@@ -42,6 +42,20 @@ pub struct Settings {
     /// several regions). Off: only `project_id` scopes what a project user sees.
     #[serde(default)]
     pub region_filter: bool,
+    /// Regular expression the `monitor` label of instance metrics must match (whole value),
+    /// e.g. `cloud`, `cloud-infras`.
+    #[serde(default = "d_cloud")]
+    pub cloud_monitor: String,
+    /// Regular expression the `monitor` label of physical server metrics must match.
+    #[serde(default = "d_physical")]
+    pub physical_monitor: String,
+}
+
+fn d_cloud() -> String {
+    "cloud.*".into()
+}
+fn d_physical() -> String {
+    "physical.*".into()
 }
 
 const fn d60() -> u32 {
@@ -86,6 +100,14 @@ impl Settings {
         ] {
             if !(1..=3650).contains(&days) {
                 bail!("cloud '{cloud}': {name} must be 1-3650");
+            }
+        }
+        for (name, re) in [
+            ("cloud_monitor", &s.cloud_monitor),
+            ("physical_monitor", &s.physical_monitor),
+        ] {
+            if re.is_empty() || re.len() > 256 || re.contains('\n') {
+                bail!("cloud '{cloud}': {name} must be a one-line regular expression");
             }
         }
         if s.timeout_seconds == 0 || s.rate_window_seconds == 0 {
@@ -133,6 +155,8 @@ mod tests {
         assert_eq!(s.project_max_range_days, 60);
         assert_eq!(s.admin_max_range_days, 365);
         assert!(!s.region_filter);
+        assert_eq!(s.cloud_monitor, "cloud.*");
+        assert_eq!(s.physical_monitor, "physical.*");
         assert!(matches!(s.auth().unwrap(), Auth::None));
     }
 
