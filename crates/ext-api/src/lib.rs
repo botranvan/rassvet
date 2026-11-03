@@ -174,12 +174,14 @@ impl<S: Send + Sync> FromRequestParts<S> for RequestContext {
     }
 }
 
-/// JSON error returned by every API route: `{"error": {"message", "request_id"}}`.
+/// JSON error returned by every API route: `{"error": {"message", "request_id"}}`, plus a
+/// machine-readable `code` when the UI has to react to it (e.g. `totp_required`).
 #[derive(Debug)]
 pub struct ApiError {
     pub status: StatusCode,
     pub message: String,
     pub request_id: Option<String>,
+    pub code: Option<&'static str>,
 }
 
 impl ApiError {
@@ -188,7 +190,13 @@ impl ApiError {
             status,
             message: message.into(),
             request_id: None,
+            code: None,
         }
+    }
+
+    pub fn with_code(mut self, code: &'static str) -> Self {
+        self.code = Some(code);
+        self
     }
 }
 
@@ -201,6 +209,7 @@ impl From<rassvet_os_client::Error> for ApiError {
         Self {
             status,
             request_id: e.request_id().map(str::to_owned),
+            code: None,
             message: match &e {
                 rassvet_os_client::Error::Api { message, .. } => message.clone(),
                 other => other.to_string(),
@@ -217,10 +226,13 @@ impl From<reqwest::Error> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = serde_json::json!({"error": {
+        let mut body = serde_json::json!({"error": {
             "message": self.message,
             "request_id": self.request_id,
         }});
+        if let Some(code) = self.code {
+            body["error"]["code"] = code.into();
+        }
         (self.status, Json(body)).into_response()
     }
 }

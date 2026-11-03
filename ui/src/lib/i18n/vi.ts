@@ -4817,6 +4817,10 @@ const vi: Record<string, string> = {
   "No values in this time range": "Không có giá trị nào trong khoảng thời gian này",
   "Show all": "Hiện tất cả",
   "Show only the ticked series": "Chỉ hiện các chuỗi được chọn",
+  // Two-step verification (TOTP) at sign-in
+  "Authentication code": "Mã xác thực",
+  "Your account uses two-step verification: enter the code shown by your authenticator app.": "Tài khoản của bạn dùng xác thực hai bước: nhập mã hiển thị trong ứng dụng xác thực.",
+  "The password or the authentication code was not accepted. Wait for a new code and try again.": "Mật khẩu hoặc mã xác thực không được chấp nhận. Hãy chờ mã mới và thử lại.",
 };
 
 export default vi;

@@ -1,6 +1,7 @@
 import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Picker } from "@/components/Picker";
 import { Button, ErrorNotice, Field, Input } from "@/components/ui";
+import { ApiError } from "@/lib/api";
 import { type CloudInfo, type LoginRequest, useClouds, useLogin, useServerVersion } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { LanguagePicker } from "@/components/LanguagePicker";
@@ -65,18 +66,41 @@ export function SignInForm({
   const [password, setPassword] = useState("");
   const [credId, setCredId] = useState("");
   const [credSecret, setCredSecret] = useState("");
+  // Two-factor accounts: Keystone wants a TOTP code with the password (asked for by the server).
+  const [totp, setTotp] = useState("");
+  const [askTotp, setAskTotp] = useState(false);
 
   const selected = list.find((c) => c.id === cloud) ?? list[0];
   useEffect(() => {
     if (!cloud && list[0]) setCloud(list[0].id);
   }, [cloud, list]);
 
+  const errorCode = mutation.error instanceof ApiError ? mutation.error.code : null;
+  useEffect(() => {
+    if (errorCode === "totp_required" || errorCode === "totp_invalid") setAskTotp(true);
+    // A refused code can't be used again: clear it for the next one.
+    if (errorCode === "totp_invalid") setTotp("");
+  }, [mutation.error, errorCode]);
+
+  /** Another account or cloud: the code asked for belonged to the previous one. */
+  const resetTotp = () => {
+    setAskTotp(false);
+    setTotp("");
+  };
+
   function submit(e: FormEvent) {
     e.preventDefault();
     if (!selected) return;
     mutation.mutate(
       method === "password"
-        ? { method, cloud: selected.id, domain: domain || undefined, username, password }
+        ? {
+            method,
+            cloud: selected.id,
+            domain: domain || undefined,
+            username,
+            password,
+            totp: askTotp && totp.trim() ? totp.replace(/\s/g, "") : undefined,
+          }
         : { method, cloud: selected.id, id: credId, secret: credSecret },
     );
   }
@@ -97,7 +121,10 @@ export function SignInForm({
             type="button"
             role="tab"
             aria-selected={method === m}
-            onClick={() => setMethod(m)}
+            onClick={() => {
+              setMethod(m);
+              resetTotp();
+            }}
             className={cn(
               "rounded-md px-3 py-1.5 font-medium text-muted transition-colors",
               method === m && "bg-panel text-ink shadow-sm",
@@ -112,7 +139,14 @@ export function SignInForm({
         {list.length > 1 && (
           <Field label={tr("Cloud")}>
             {(id) => (
-              <Picker id={id} value={selected?.id ?? ""} onChange={setCloud} options={list.map((c) => ({ value: c.id, label: c.name, icon: "server" }))} />
+              <Picker
+                id={id}
+                value={selected?.id ?? ""}
+                onChange={(v) => {
+                  setCloud(v);
+                  resetTotp();
+                }}
+                options={list.map((c) => ({ value: c.id, label: c.name, icon: "server" }))} />
             )}
           </Field>
         )}
@@ -124,7 +158,10 @@ export function SignInForm({
                 <Input
                   id={id}
                   value={domain}
-                  onChange={(e) => setDomain(e.target.value)}
+                  onChange={(e) => {
+                    setDomain(e.target.value);
+                    resetTotp();
+                  }}
                   placeholder={selected?.default_domain ?? tr("Default")}
                   autoComplete="organization"
                 />
@@ -137,7 +174,10 @@ export function SignInForm({
                   required
                   autoFocus
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    resetTotp();
+                  }}
                   autoComplete="username"
                 />
               )}
@@ -154,6 +194,28 @@ export function SignInForm({
                 />
               )}
             </Field>
+            {askTotp && (
+              <Field
+                label={tr("Authentication code")}
+                hint={tr("Your account uses two-step verification: enter the code shown by your authenticator app.")}
+              >
+                {(id) => (
+                  <Input
+                    id={id}
+                    required
+                    autoFocus
+                    value={totp}
+                    onChange={(e) => setTotp(e.target.value)}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9 ]{4,12}"
+                    maxLength={12}
+                    placeholder="123456"
+                    className="font-mono tracking-widest"
+                  />
+                )}
+              </Field>
+            )}
           </>
         ) : (
           <>
@@ -184,7 +246,16 @@ export function SignInForm({
           </>
         )}
 
-        <ErrorNotice error={mutation.error ?? error} />
+        {/* "Enter the code" is a step, not an error: the code field's hint says it. */}
+        <ErrorNotice
+          error={
+            errorCode === "totp_required"
+              ? error
+              : errorCode === "totp_invalid"
+                ? new Error(tr("The password or the authentication code was not accepted. Wait for a new code and try again."))
+                : (mutation.error ?? error)
+          }
+        />
 
         <Button
           type="submit"

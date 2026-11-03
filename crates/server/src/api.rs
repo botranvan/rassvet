@@ -220,6 +220,10 @@ enum LoginRequest {
         username: String,
         password: String,
         project_id: Option<String>,
+        /// TOTP passcode, for accounts whose multi-factor rules require it (asked for after
+        /// a `totp_required` answer).
+        #[serde(default)]
+        totp: Option<String>,
     },
     ApplicationCredential {
         cloud: String,
@@ -424,12 +428,68 @@ async fn sign_in(st: &AppState, req: LoginRequest) -> Result<(String, CloudLogin
             Ok(ok)
         }
         Err(e) => {
-            if e.status == StatusCode::UNAUTHORIZED {
+            // A right password that only lacks the TOTP code isn't a failed attempt; a wrong
+            // code is (the lockout also limits guessing codes).
+            if e.status == StatusCode::UNAUTHORIZED && e.code != Some(TOTP_REQUIRED) {
                 st.login_throttle.failure(&key);
                 tracing::info!(account = %key, "sign-in failed");
             }
             Err(Box::new(e.into_response()))
         }
+    }
+}
+
+/// `error.code` when the account needs a TOTP code (sign in again with `totp`).
+const TOTP_REQUIRED: &str = "totp_required";
+/// `error.code` when the TOTP code given was refused.
+const TOTP_INVALID: &str = "totp_invalid";
+
+/// A TOTP passcode as typed: digits only (spaces removed), 4-10 of them.
+fn totp_code(raw: Option<String>) -> Result<Option<String>, ApiError> {
+    let Some(raw) = raw else { return Ok(None) };
+    let code: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    if code.is_empty() {
+        return Ok(None);
+    }
+    if !(4..=10).contains(&code.len()) || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "the authentication code is the 6 digits shown by your authenticator app",
+        )
+        .with_code(TOTP_INVALID));
+    }
+    Ok(Some(code))
+}
+
+/// Keystone wants more than what was sent (`Openstack-Auth-Receipt`): ask for the TOTP code
+/// when a rule can be met with password + TOTP, otherwise say the account can't sign in here.
+fn mfa_error(methods: &[Vec<String>], totp_sent: bool) -> ApiError {
+    let by_totp = methods.is_empty()
+        || methods.iter().any(|rule| {
+            rule.iter().any(|m| m == "totp") && rule.iter().all(|m| m == "password" || m == "totp")
+        });
+    if !by_totp {
+        let rules: Vec<String> = methods.iter().map(|r| r.join(" + ")).collect();
+        return ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            format!(
+                "this account must sign in with {}, which Rassvet doesn't support",
+                rules.join(" or ")
+            ),
+        );
+    }
+    if totp_sent {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "the authentication code was not accepted; wait for a new code and try again",
+        )
+        .with_code(TOTP_INVALID)
+    } else {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "enter the code from your authenticator app",
+        )
+        .with_code(TOTP_REQUIRED)
     }
 }
 
@@ -451,16 +511,35 @@ async fn authenticate(st: &AppState, req: LoginRequest) -> Result<(String, Cloud
             username,
             password,
             project_id,
+            totp,
             ..
         } => {
+            let totp = totp_code(totp)?;
+            let totp_sent = totp.is_some();
             let method = AuthMethod::Password {
                 username,
                 password,
                 user_domain: domain
                     .filter(|d| !d.trim().is_empty())
                     .unwrap_or_else(|| cloud.cfg.default_domain.clone()),
+                totp,
             };
-            let unscoped = ks.authenticate(&method, &Scope::Unscoped).await?;
+            let unscoped = match ks.authenticate(&method, &Scope::Unscoped).await {
+                Ok(t) => t,
+                Err(rassvet_os_client::Error::MfaRequired { methods }) => {
+                    return Err(mfa_error(&methods, totp_sent));
+                }
+                // With a code, Keystone refuses a wrong code (or password) with a plain 401:
+                // keep the code field open.
+                Err(e) if totp_sent && e.status() == Some(reqwest::StatusCode::UNAUTHORIZED) => {
+                    return Err(ApiError::new(
+                        StatusCode::UNAUTHORIZED,
+                        "the password or the authentication code was not accepted",
+                    )
+                    .with_code(TOTP_INVALID));
+                }
+                Err(e) => return Err(e.into()),
+            };
             let projects = ks.list_auth_projects(&unscoped.value).await?;
             let target = project_id
                 .filter(|id| projects.iter().any(|p| &p.id == id))
@@ -857,6 +936,166 @@ async fn nav_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_partial_json, method, path},
+    };
+
+    /// A Keystone where alice's MFA rules need password + TOTP (code 123456).
+    async fn mfa_keystone() -> MockServer {
+        let ks = MockServer::start().await;
+        let receipt = ResponseTemplate::new(401)
+            .insert_header("Openstack-Auth-Receipt", "rcpt")
+            .set_body_json(serde_json::json!({
+                "receipt": {"methods": ["password"], "user": {"id": "u1"}},
+                "required_auth_methods": [["password", "totp"]],
+            }));
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .and(body_partial_json(serde_json::json!({"auth": {"identity": {
+                "methods": ["password", "totp"],
+                "totp": {"user": {"name": "alice", "passcode": "123456"}},
+            }}})))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .insert_header("X-Subject-Token", "tok")
+                    .set_body_json(serde_json::json!({"token": {
+                        "expires_at": "2099-01-01T00:00:00.000000Z",
+                        "methods": ["password", "totp"],
+                        "user": {"id": "u1", "name": "alice"},
+                        "roles": [],
+                    }})),
+            )
+            .with_priority(1)
+            .mount(&ks)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .and(body_partial_json(
+                serde_json::json!({"auth": {"identity": {"methods": ["password"]}}}),
+            ))
+            .respond_with(receipt)
+            .with_priority(2)
+            .mount(&ks)
+            .await;
+        // Any other code: refused.
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": {"code": 401, "message": "The request you have made requires authentication."}
+            })))
+            .with_priority(5)
+            .mount(&ks)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v3/auth/projects"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"projects": []})),
+            )
+            .mount(&ks)
+            .await;
+        ks
+    }
+
+    fn state_for(ks: &MockServer) -> AppState {
+        let cfg: crate::config::Config = toml::from_str(&format!(
+            "[[cloud]]\nid = \"lab\"\nname = \"Lab\"\nauth_url = \"{}/v3\"\n",
+            ks.uri()
+        ))
+        .unwrap();
+        crate::state::build(cfg, vec![]).unwrap()
+    }
+
+    fn login(totp: Option<&str>) -> LoginRequest {
+        serde_json::from_value(serde_json::json!({
+            "method": "password", "cloud": "lab", "username": "alice", "password": "secret",
+            "totp": totp,
+        }))
+        .unwrap()
+    }
+
+    /// The refusal of a sign-in that must fail.
+    fn refused(r: Result<(String, CloudLogin), Box<Response>>) -> Box<Response> {
+        match r {
+            Ok(_) => panic!("sign-in should have been refused"),
+            Err(res) => res,
+        }
+    }
+
+    async fn error_of(res: Box<Response>) -> (StatusCode, serde_json::Value) {
+        let status = res.status();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn totp_accounts_sign_in_in_two_steps() {
+        let ks = mfa_keystone().await;
+        let st = state_for(&ks);
+
+        // Step 1: the right password alone asks for the code.
+        let (status, body) = error_of(refused(sign_in(&st, login(None)).await)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "totp_required");
+
+        // A wrong code is refused, the code field stays open.
+        let (status, body) = error_of(refused(sign_in(&st, login(Some("000000"))).await)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["code"], "totp_invalid");
+
+        // Not digits: refused before Keystone.
+        let (status, body) = error_of(refused(sign_in(&st, login(Some("12ab56"))).await)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "totp_invalid");
+
+        // Step 2: password and code together.
+        let Ok((_, cl)) = sign_in(&st, login(Some("123 456"))).await else {
+            panic!("password + code should sign in");
+        };
+        assert_eq!(cl.token.value, "tok");
+        assert_eq!(cl.token.methods, ["password", "totp"]);
+    }
+
+    #[tokio::test]
+    async fn asking_for_the_code_is_not_a_failed_attempt() {
+        let ks = mfa_keystone().await;
+        let st = state_for(&ks);
+        for _ in 0..crate::throttle::MAX_FAILURES + 2 {
+            let (status, _) = error_of(refused(sign_in(&st, login(None)).await)).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+        }
+        assert!(sign_in(&st, login(Some("123456"))).await.is_ok());
+        // Wrong codes count: guessing is locked out.
+        for _ in 0..crate::throttle::MAX_FAILURES {
+            let _ = sign_in(&st, login(Some("000000"))).await;
+        }
+        let (status, _) = error_of(refused(sign_in(&st, login(Some("123456"))).await)).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn mfa_rules_rassvet_cannot_meet() {
+        let e = mfa_error(
+            &[vec!["password".into(), "application_credential".into()]],
+            false,
+        );
+        assert_eq!(e.code, None);
+        assert!(
+            e.message.contains("password + application_credential"),
+            "{}",
+            e.message
+        );
+        assert_eq!(
+            mfa_error(&[vec!["password".into(), "totp".into()]], false).code,
+            Some(TOTP_REQUIRED)
+        );
+        assert_eq!(
+            mfa_error(&[vec!["totp".into()]], true).code,
+            Some(TOTP_INVALID)
+        );
+    }
 
     fn req(uri: &str, header: Option<&str>) -> Request {
         let mut b = Request::builder().uri(uri);
