@@ -276,12 +276,15 @@
     { g: "Pages", i: "chart", l: "Monitors", k: "prometheus dashboards yaml charts cpu memory", run: go("monitors.html") },
     { g: "Pages", i: "code", l: "Extensions", k: "develop crate sdk plugin octavia magnum designate", run: go("extensions.html") },
     { g: "Pages", i: "image", l: "Design & UI/UX", k: "colors palette leds fonts theme", run: go("design.html") },
+    { g: "Pages", i: "book", l: "Docs", k: "documentation user guide admin project", run: go("docs.html") },
     { g: "Pages", i: "arrow", l: "Get started", k: "build install cargo pnpm quick start", run: go("index.html#start") },
     { g: "Actions", i: "sun", l: "Toggle dark / light theme", k: "dark theme light mode", run: toggleTheme },
     { g: "Actions", i: "code", l: "Copy build commands", k: "copy cargo build", run: () => copyText("cd ui && pnpm install && pnpm build && cd ..\ncargo build --release\n./target/release/rassvet --config rassvet.toml") },
     { g: "Links", i: "gh", l: "Open the repository on GitHub", k: "github source code repo", run: () => open("https://github.com/botranvan/rassvet", "_blank", "noopener") },
-    { g: "Links", i: "book", l: "Read the user guide", k: "docs documentation guide", run: () => open("https://github.com/botranvan/rassvet/tree/master/docs", "_blank", "noopener") },
+    
   ];
+  // Lets page scripts (docs.js) add palette entries and reuse helpers.
+  window.rassvet = { addCommands: (list) => commands.push(...list), toast, copyText: (t) => copyText(t) };
   let cSel = 0;
   let cItems = [];
   const renderCmdk = () => {
