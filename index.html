@@ -19,7 +19,7 @@
     try { var t = localStorage.getItem("rassvet-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
 </head>
-<body>
+<body data-page="home">
   <div class="progress" aria-hidden="true"></div>
   <canvas id="sky" aria-hidden="true"></canvas>
   <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -27,18 +27,17 @@
   <!-- ============================== NAV -->
   <header class="nav" id="top">
     <div class="container nav__inner">
-      <a class="brand" href="#top" aria-label="Rassvet home">
+      <a class="brand" href="index.html" aria-label="Rassvet home">
         <img src="assets/img/logo.svg" alt="" width="30" height="30">
         <span>rassvet</span>
       </a>
       <nav class="nav__links" aria-label="Main">
-        <a href="#features">Features</a>
-        <a href="#palette">Palette</a>
-        <a href="#clouds">Multi-cloud</a>
-        <a href="#monitors">Monitors</a>
-        <a href="#extensions">Extensions</a>
-        <a href="#design">Design</a>
-        <a href="#start">Get started</a>
+        <a href="multi-cloud.html" data-page="multi-cloud">Multi-cloud</a>
+        <a href="palette.html" data-page="palette">Palette</a>
+        <a href="monitors.html" data-page="monitors">Monitors</a>
+        <a href="extensions.html" data-page="extensions">Extensions</a>
+        <a href="design.html" data-page="design">Design</a>
+        <a href="index.html#start" data-page="start">Get started</a>
       </nav>
       <div class="nav__actions">
         <button class="kbd-btn" data-open-palette aria-label="Open command palette">
@@ -65,7 +64,7 @@
     <section class="hero">
       <div class="container hero__grid">
         <div class="hero__copy">
-          <a class="pill reveal" href="#clouds">
+          <a class="pill reveal" href="multi-cloud.html">
             <span class="pill__new">New</span> Many clouds, one dashboard. Sign in once, switch in one click
             <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
           </a>
@@ -151,7 +150,7 @@
             <h3>Monitors</h3>
             <p>CPU, memory, disk and network dashboards for every instance and physical server, straight from Prometheus — defined in YAML, up to 60 days back.</p>
             <div class="mini-chart" aria-hidden="true"><canvas data-mini-chart></canvas></div>
-            <a class="card__link" href="#monitors">Explore monitors →</a>
+            <a class="card__link" href="monitors.html">Explore monitors →</a>
           </article>
 
           <article class="card card--tall spot reveal">
@@ -165,7 +164,7 @@
               <li>launch</li>
               <li>dark theme</li>
             </ul>
-            <a class="card__link" href="#palette">See it in action →</a>
+            <a class="card__link" href="palette.html">See it in action →</a>
           </article>
 
           <article class="card card--wide spot reveal">
@@ -173,7 +172,7 @@
             <h3>Easy to extend</h3>
             <p>An extension is a Rust crate plus a React folder. It brings its own routes, nav entries, palette actions, Terraform export and cleanup finders, and the host needs no changes. Octavia, Magnum, Designate and Monitors are all built this way.</p>
             <div class="ext-chips" aria-hidden="true"><span>lib.rs</span><span>index.tsx</span><span>palette.ts</span><span>terraform.ts</span><span>cleanup.tsx</span></div>
-            <a class="card__link" href="#extensions">Build one →</a>
+            <a class="card__link" href="extensions.html">Build one →</a>
           </article>
 
           <article class="card spot reveal">
@@ -193,7 +192,7 @@
             <div class="card__icon"><svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg></div>
             <h3>Many clouds, one dashboard</h3>
             <p>Sign in to all your clouds at once and switch per tab without signing in again.</p>
-            <a class="card__link" href="#clouds">See how →</a>
+            <a class="card__link" href="multi-cloud.html">See how →</a>
           </article>
 
           <article class="card spot reveal">
@@ -213,394 +212,6 @@
             <h3>Cleanup</h3>
             <p>Find idle volumes, floating IPs and leftovers wasting quota — per project or across all.</p>
           </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================== PALETTE -->
-    <section class="section section--split" id="palette">
-      <div class="container split">
-        <div class="split__copy reveal">
-          <span class="eyebrow">Keyboard first</span>
-          <h2>The fastest way<br><span class="grad">to go anywhere.</span></h2>
-          <p>The command palette searches every kind of resource the cloud has — instances, volumes, ports,
-            routers, secrets, DNS zones, Kubernetes clusters — plus pages and actions. Paste a UUID and it
-            opens the resource. Type <code>vol:db</code> to search one kind only.</p>
-          <ul class="checks">
-            <li>Pages, actions and resources in one list</li>
-            <li><code>&lt;alias&gt;:&lt;name&gt;</code> scoped search, IPs and CIDRs</li>
-            <li>Switch project, region or cloud without the mouse</li>
-            <li>Extensions add their own keywords, actions and kinds</li>
-          </ul>
-          <button class="btn btn--primary magnetic" data-open-palette>
-            Open the palette on this page <kbd>⌘K</kbd>
-          </button>
-        </div>
-
-        <div class="demo reveal" aria-hidden="true">
-          <div class="demo__palette">
-            <div class="demo__input">
-              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-              <span id="demo-typed"></span><span class="caret"></span>
-              <kbd>Esc</kbd>
-            </div>
-            <ul class="demo__results" id="demo-results"></ul>
-            <div class="demo__foot"><span>↑↓ to move</span><span>↵ to open</span><span class="r">Names or a pasted UUID find resources</span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================== MULTI-CLOUD -->
-    <section class="section section--clouds" id="clouds">
-      <div class="container">
-        <header class="section__head reveal">
-          <span class="eyebrow">Multi-cloud</span>
-          <h2>Every cloud you run.<br><span class="grad">One dashboard, one session.</span></h2>
-          <p>Lab, staging and production. Hanoi and Saigon. Your own OpenStack and a customer's. Sign in to all of
-            them once and switch in one click. No second browser, no private windows, no signing in again.</p>
-        </header>
-
-        <div class="clouds">
-          <!-- Interactive demo -->
-          <div class="mc reveal" id="mc">
-            <div class="mc__tabs" aria-label="Browser tabs, one per cloud">
-              <div class="mc__tabstrip" id="mc-tabstrip"></div>
-              <span class="mc__hint">each tab keeps its own cloud</span>
-            </div>
-            <div class="mc__win">
-              <div class="mc__top">
-                <img src="assets/img/logo.svg" alt="" width="20" height="20"><b>rassvet</b>
-                <div class="mc__spacer"></div>
-                <div class="mc__menu-wrap">
-                  <button class="mc__btn mc__btn--cloud" id="mc-cloud-btn" aria-haspopup="menu" aria-expanded="false">
-                    <svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg>
-                    <span id="mc-cloud-name">Hanoi lab</span>
-                    <svg viewBox="0 0 24 24" class="chev"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
-                  </button>
-                  <div class="mc__menu" id="mc-menu" role="menu" hidden>
-                    <div class="mc__menu-h">Signed in to</div>
-                    <ul id="mc-list"></ul>
-                    <button class="mc__add" id="mc-add" role="menuitem">
-                      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Sign in to another cloud
-                    </button>
-                  </div>
-                </div>
-                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="mc-project">admin</span></span>
-                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span id="mc-region">RegionOne</span></span>
-              </div>
-              <div class="mc__body" id="mc-body">
-                <div class="mc__title">
-                  <div>
-                    <h4 id="mc-heading">admin</h4>
-                    <p id="mc-sub">Signed in as admin on Hanoi lab, region RegionOne.</p>
-                  </div>
-                  <span class="mc__badge" id="mc-badge"><span class="led led--green"></span><span id="mc-release">2026.2 Hibiscus</span></span>
-                </div>
-                <div class="mc__quota" id="mc-quota"></div>
-                <div class="mc__svc" id="mc-svc"></div>
-              </div>
-
-              <!-- sign-in dialog for "Sign in to another cloud" -->
-              <div class="mc__dlg" id="mc-dlg" hidden>
-                <div class="mc__dlg-card">
-                  <h5>Sign in to another cloud</h5>
-                  <label>Cloud<span class="mc__field" id="mc-dlg-cloud">Production</span></label>
-                  <label>Username<span class="mc__field mc__field--type" id="mc-dlg-user"></span></label>
-                  <label>Password<span class="mc__field" id="mc-dlg-pass"></span></label>
-                  <div class="mc__dlg-actions"><span class="mc__ok" id="mc-dlg-ok">Sign in</span></div>
-                </div>
-              </div>
-            </div>
-            <div class="mc__foot">
-              <span><kbd>Click</kbd> the cloud menu to switch, add, or sign out of one cloud</span>
-              <button class="mc__reset" id="mc-reset">Reset demo</button>
-            </div>
-          </div>
-
-          <!-- Benefits -->
-          <div class="clouds__copy">
-            <ul class="benefits">
-              <li class="reveal">
-                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></div>
-                <div><h4>Switch in one click, no password</h4>
-                <p>Pick a cloud from <b>Signed in to</b> in the top bar, or press <kbd>⌘K</kbd> and type its name. You land on
-                  the same page in the other cloud, with the user and project you use there.</p></div>
-              </li>
-              <li class="reveal">
-                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M8 4v5"/></svg></div>
-                <div><h4>One tab per cloud, side by side</h4>
-                <p>Each browser tab remembers its own cloud. Keep lab on the left and production on the right, and compare
-                  flavors, images or security groups while you work.</p></div>
-              </li>
-              <li class="reveal">
-                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
-                <div><h4>Separate credentials, kept apart</h4>
-                <p>Every cloud has its own accounts and its own Keystone tokens, stored on the server and never mixed.
-                  When one token expires, only that cloud is signed out.</p></div>
-              </li>
-              <li class="reveal">
-                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
-                <div><h4>Leave one cloud or all of them</h4>
-                <p>The sign-out icon next to a cloud leaves only that cloud. <b>Sign out</b> in the account menu leaves every
-                  cloud at once.</p></div>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <!-- How it works -->
-        <div class="flow">
-          <div class="flow__step reveal"><span class="flow__n">1</span><h4>Sign in once</h4><p>Pick a <b>Cloud</b> on the sign-in page and use a password or an application credential.</p></div>
-          <div class="flow__step reveal"><span class="flow__n">2</span><h4>Add another cloud</h4><p>Cloud menu → <b>Sign in to another cloud</b>. Enter that cloud's credentials and stay signed in to the others.</p></div>
-          <div class="flow__step reveal"><span class="flow__n">3</span><h4>Switch freely</h4><p>Cloud menu, <kbd>⌘K</kbd>, or a different tab. Every page reloads its data for the cloud you picked.</p></div>
-          <div class="flow__step reveal"><span class="flow__n">4</span><h4>Expiry handled</h4><p>When a cloud's sign-in expires, its tabs move to a cloud you are still signed in to.</p></div>
-        </div>
-
-        <!-- Use cases + under the hood -->
-        <div class="clouds__grid">
-          <div class="usecases reveal">
-            <h3>Made for</h3>
-            <ul>
-              <li><b>Platform teams</b><span>running lab, staging and production clouds, and promoting changes between them.</span></li>
-              <li><b>Multi-site operators</b><span>with one OpenStack per datacenter or country, each with its own Keystone.</span></li>
-              <li><b>Service providers</b><span>who look after several customer clouds from one browser.</span></li>
-              <li><b>Migrations</b><span>moving workloads from an old cloud to a new one, with both open side by side.</span></li>
-            </ul>
-          </div>
-
-          <div class="code reveal">
-            <div class="code__bar"><span>rassvet.toml: one block per cloud</span><button class="copy" data-copy="#clouds-src">Copy</button></div>
-<pre id="clouds-src"><code>[[<span class="t">cloud</span>]]
-<span class="k">id</span>       = <span class="s">"hanoi"</span>
-<span class="k">name</span>     = <span class="s">"Hanoi lab"</span>
-<span class="k">auth_url</span> = <span class="s">"https://keystone.hn.example.com:5000/v3"</span>
-<span class="k">default_domain</span> = <span class="s">"Default"</span>
-
-[[<span class="t">cloud</span>]]
-<span class="k">id</span>       = <span class="s">"saigon"</span>
-<span class="k">name</span>     = <span class="s">"Saigon lab"</span>
-<span class="k">auth_url</span> = <span class="s">"https://keystone.sg.example.com:5000/v3"</span>
-<span class="k">interface</span> = <span class="s">"public"</span>   <span class="c"># public | internal | admin</span></code></pre>
-          </div>
-
-          <div class="hood reveal">
-            <h3>Under the hood</h3>
-            <dl>
-              <div><dt><code>X-Rassvet-Cloud</code></dt><dd>Every request names its cloud, so each tab works on its own one. Downloads use <code>?rassvet_cloud=</code>.</dd></div>
-              <div><dt>Per-cloud tokens</dt><dd>The session lasts until its last cloud's token expires, within the idle and maximum limits.</dd></div>
-              <div><dt>Per-cloud microversions</dt><dd>Negotiated with each cloud, so clouds on different releases work together.</dd></div>
-              <div><dt>Shared via memcached</dt><dd>Multi-cloud sessions survive restarts and work behind a load balancer.</dd></div>
-            </dl>
-          </div>
-        </div>
-
-        <div class="clouds__shots">
-          <figure class="shot-card reveal" data-lightbox="assets/img/cloud-menu.png">
-            <img src="assets/img/cloud-menu.png" alt="Cloud menu signed in to Hanoi lab and Saigon lab" loading="lazy">
-            <figcaption>The cloud menu: signed in to two clouds, each with its own user and project.</figcaption>
-          </figure>
-          <figure class="shot-card reveal" data-lightbox="assets/img/palette-cloud.png">
-            <img src="assets/img/palette-cloud.png" alt="Switch cloud from the command palette" loading="lazy">
-            <figcaption>Or press ⌘K and type the cloud's name.</figcaption>
-          </figure>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================== MONITORS -->
-    <section class="section" id="monitors">
-      <div class="container">
-        <header class="section__head reveal">
-          <span class="eyebrow">Monitors</span>
-          <h2>Dashboards that come<br><span class="grad">from your Prometheus.</span></h2>
-          <p>Instance monitors for every project user, physical server monitors for admins. Panels are plain YAML:
-            copy the built-ins, change a query, reload.</p>
-        </header>
-
-        <div class="monitor-grid">
-          <div class="panel reveal">
-            <div class="panel__head">
-              <div><b>CPU usage</b><small>web-01 · last 6 hours</small></div>
-              <div class="seg" role="group" aria-label="Series">
-                <button class="is-on" data-series="0">total</button>
-                <button class="is-on" data-series="1">user</button>
-                <button class="is-on" data-series="2">system</button>
-              </div>
-            </div>
-            <canvas id="live-chart" height="260"></canvas>
-            <table class="legend">
-              <thead><tr><th>Series</th><th>Last</th><th>Avg</th><th>Max</th></tr></thead>
-              <tbody id="legend-body"></tbody>
-            </table>
-          </div>
-
-          <div class="panel panel--gauge reveal">
-            <div class="panel__head"><div><b>Memory in use now</b><small>guest · virtio-balloon</small></div></div>
-            <svg class="gauge" viewBox="0 0 200 120">
-              <defs>
-                <linearGradient id="g-grad" x1="0" x2="1"><stop offset="0" stop-color="#2d8cff"/><stop offset="1" stop-color="#22b5b0"/></linearGradient>
-              </defs>
-              <path class="gauge__track" d="M20 110 A80 80 0 0 1 180 110"/>
-              <path class="gauge__fill" id="gauge-fill" d="M20 110 A80 80 0 0 1 180 110"/>
-            </svg>
-            <div class="gauge__value"><span id="gauge-value">0</span>%</div>
-            <div class="gauge__scale"><span>0%</span><span>used</span><span>100%</span></div>
-          </div>
-
-          <div class="code reveal">
-            <div class="code__bar"><span>panels/default.yaml</span><button class="copy" data-copy="#yaml-src">Copy</button></div>
-<pre id="yaml-src"><code><span class="c"># instances: the libvirt exec script</span>
-- <span class="k">dashboard</span>: <span class="s">cloud.*</span>
-  <span class="k">title</span>: <span class="s">Instances</span>
-  <span class="k">kind</span>: <span class="s">instance</span>        <span class="c"># or physical</span>
-  <span class="k">panels</span>:
-    - <span class="k">name</span>: <span class="s">cpu</span>
-      <span class="k">title</span>: <span class="s">CPU usage</span>
-      <span class="k">unit</span>: <span class="s">percent</span>
-      <span class="k">queries</span>:
-        - <span class="k">query</span>: <span class="s">&gt;-
-            100 * sum(rate(libvirt_cpu_user{
-              guest_id="$guest_id"}[$__rate_interval]))
-            / 1e9 / max(libvirt_cpu_number{...})</span>
-          <span class="k">legend</span>: <span class="s">user</span></code></pre>
-          </div>
-
-          <figure class="shot-card reveal" data-lightbox="assets/img/physical-server-monitors.png">
-            <img src="assets/img/physical-server-monitors.png" alt="Physical server monitors dashboard" loading="lazy">
-            <figcaption>Physical server monitors — the whole fleet, then one host.</figcaption>
-          </figure>
-        </div>
-
-        <ul class="feature-row reveal">
-          <li><b>Line, stat, gauge &amp; pie</b><span>panels with last / avg / max tables</span></li>
-          <li><b>Variables</b><span>dropdowns kept in the URL, shareable</span></li>
-          <li><b>Scoped</b><span>users only see their own project</span></li>
-          <li><b>Auto refresh</b><span>every minute, or ↻ right away</span></li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- ============================== EXTENSIONS -->
-    <section class="section section--alt" id="extensions">
-      <div class="container">
-        <header class="section__head reveal">
-          <span class="eyebrow">Easy to develop</span>
-          <h2>Extend it with a crate<br><span class="grad">and a folder.</span></h2>
-          <p>Octavia, Magnum, Designate and Monitors are all extensions. Each one is a compile-time Rust crate
-            with its own React UI — the host has no extension-specific code.</p>
-        </header>
-
-        <div class="ext">
-          <aside class="tree reveal">
-            <div class="tree__title">extensions/</div>
-            <ul>
-              <li class="dir open"><span>my-service/</span>
-                <ul>
-                  <li class="file" data-file="cargo"><span>Cargo.toml</span></li>
-                  <li class="dir open"><span>src/</span>
-                    <ul><li class="file is-active" data-file="lib"><span>lib.rs</span><em>Extension</em></li></ul>
-                  </li>
-                  <li class="dir open"><span>ui/</span>
-                    <ul>
-                      <li class="file" data-file="index"><span>index.tsx</span><em>routes</em></li>
-                      <li class="file" data-file="palette"><span>palette.ts</span><em>⌘K</em></li>
-                      <li class="file" data-file="terraform"><span>terraform.ts</span><em>IaC</em></li>
-                      <li class="file" data-file="cleanup"><span>cleanup.tsx</span><em>findings</em></li>
-                    </ul>
-                  </li>
-                </ul>
-              </li>
-            </ul>
-          </aside>
-
-          <div class="code code--big reveal">
-            <div class="code__bar"><span id="ext-file-name">src/lib.rs</span><button class="copy" data-copy="#ext-code">Copy</button></div>
-            <pre id="ext-code"><code></code></pre>
-          </div>
-        </div>
-
-        <ol class="steps">
-          <li class="reveal"><span class="steps__n">1</span><h4>Implement <code>Extension</code></h4><p>A manifest with required <code>service_types</code>, nav items and axum routes mounted at <code>/api/ext/&lt;id&gt;</code>.</p></li>
-          <li class="reveal"><span class="steps__n">2</span><h4>Export an <code>ExtensionUi</code></h4><p>Routes under <code>/ext/&lt;id&gt;/…</code>, importing components and the API client only from <code>@rassvet/sdk</code>.</p></li>
-          <li class="reveal"><span class="steps__n">3</span><h4>Register a feature</h4><p>Add <code>ext-&lt;id&gt;</code> in Cargo, register it — it appears only where the catalog has the service.</p></li>
-        </ol>
-      </div>
-    </section>
-
-    <!-- ============================== ARCHITECTURE -->
-    <section class="section" id="architecture">
-      <div class="container">
-        <header class="section__head reveal">
-          <span class="eyebrow">Architecture</span>
-          <h2>Tokens stay on the server.<br><span class="grad">Always.</span></h2>
-        </header>
-        <div class="arch reveal">
-          <div class="arch__node">
-            <div class="arch__icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg></div>
-            <b>Browser</b><small>React + TypeScript + Tailwind</small>
-            <span class="chip">HttpOnly · SameSite=Strict</span>
-          </div>
-          <div class="arch__wire"><i></i><span>/api · X-Rassvet-CSRF</span></div>
-          <div class="arch__node arch__node--core">
-            <div class="arch__icon"><img src="assets/img/logo.svg" alt=""></div>
-            <b>rassvet</b><small>Rust · axum · tokio · reqwest</small>
-            <div class="arch__mods"><span>sessions</span><span>core API</span><span>extensions</span><span>embedded UI</span></div>
-          </div>
-          <div class="arch__wire"><i></i><span>Keystone token · microversions</span></div>
-          <div class="arch__node">
-            <div class="arch__icon"><svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg></div>
-            <b>OpenStack</b><small>2026.1 Gazpacho → 2026.2 Hibiscus</small>
-            <span class="chip">global_request_id traced</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============================== DESIGN -->
-    <section class="section section--alt" id="design">
-      <div class="container">
-        <header class="section__head reveal">
-          <span class="eyebrow">UI / UX model</span>
-          <h2>Designed like a<br><span class="grad">datacenter console.</span></h2>
-          <p>A small, strict design language so every page behaves the same — learn one list, know them all.</p>
-        </header>
-
-        <div class="principles">
-          <div class="principle reveal">
-            <div class="swatches"><i style="--c:#1b2029"></i><i style="--c:#232a35"></i><i style="--c:#2e3644"></i></div>
-            <h4>Rack graphite</h4><p>Neutral surfaces that stay out of the way of your data.</p>
-          </div>
-          <div class="principle reveal">
-            <div class="swatches"><i style="--c:#0f8b8d"></i><i style="--c:#22b5b0"></i><i style="--c:#e3f3f2"></i></div>
-            <h4>One accent: patch-cable teal</h4><p>Reserved for the active state and the primary action.</p>
-          </div>
-          <div class="principle reveal">
-            <div class="swatches leds"><i style="--c:#3dcb7a"></i><i style="--c:#e8a33d"></i><i style="--c:#e5484d"></i></div>
-            <h4>Status LEDs</h4><p>Green, amber, red — for resource state only, never decoration.</p>
-          </div>
-          <div class="principle reveal">
-            <div class="type-sample"><span>Aa</span><code>{ }</code></div>
-            <h4>Be Vietnam Pro + JetBrains Mono</h4><p>Readable UI type, monospaced IDs, IPs and code.</p>
-          </div>
-        </div>
-
-        <div class="ux-grid">
-          <div class="ux reveal"><span>01</span><h4>Same list everywhere</h4><p>Filter, sort, server-side search, column chooser, CSV export and a ⋮ menu on every row.</p></div>
-          <div class="ux reveal"><span>02</span><h4>Actions where you look</h4><p>Row menus and the detail page share the same set of actions.</p></div>
-          <div class="ux reveal"><span>03</span><h4>Policy-aware menus</h4><p>Entries appear only when the cloud lets the user use them.</p></div>
-          <div class="ux reveal"><span>04</span><h4>Wizards with impact</h4><p>The launch wizard reviews quota impact before anything is created.</p></div>
-          <div class="ux reveal"><span>05</span><h4>Shareable URLs</h4><p>Filters, instance and time range live in the address bar.</p></div>
-          <div class="ux reveal"><span>06</span><h4>Light &amp; dark</h4><p>Both themes, a collapsible sidebar, and the choice is remembered.</p></div>
-        </div>
-
-        <div class="gallery">
-          <figure class="reveal" data-lightbox="assets/img/launch-3-flavor.png"><img src="assets/img/launch-3-flavor.png" alt="Launch wizard flavor step" loading="lazy"><figcaption>Launch wizard</figcaption></figure>
-          <figure class="reveal" data-lightbox="assets/img/terraform.png"><img src="assets/img/terraform.png" alt="Export to Terraform" loading="lazy"><figcaption>Export to Terraform</figcaption></figure>
-          <figure class="reveal" data-lightbox="assets/img/admin-hypervisors.png"><img src="assets/img/admin-hypervisors.png" alt="Admin hypervisors" loading="lazy"><figcaption>Hypervisors</figcaption></figure>
-          <figure class="reveal" data-lightbox="assets/img/topology.png"><img src="assets/img/topology.png" alt="Network topology" loading="lazy"><figcaption>Topology</figcaption></figure>
-          <figure class="reveal" data-lightbox="assets/img/cleanup.png"><img src="assets/img/cleanup.png" alt="Cleanup" loading="lazy"><figcaption>Cleanup</figcaption></figure>
-          <figure class="reveal" data-lightbox="assets/img/palette-cloud.png"><img src="assets/img/palette-cloud.png" alt="Switch cloud from the palette" loading="lazy"><figcaption>Switch cloud</figcaption></figure>
         </div>
       </div>
     </section>

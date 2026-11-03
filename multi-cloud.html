@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-cloud · Rassvet</title>
+  <meta name="description" content="Sign in to every OpenStack cloud you run and switch between them in one click, with one Rassvet session.">
+  <meta name="theme-color" content="#f6f8fb">
+  <meta property="og:title" content="Multi-cloud · Rassvet">
+  <meta property="og:description" content="Single binary. Rust + React. Monitors, command palette and compile-time extensions for OpenStack.">
+  <meta property="og:image" content="assets/img/overview.png">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <script>
+    try { var t = localStorage.getItem("rassvet-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body data-page="multi-cloud">
+  <div class="progress" aria-hidden="true"></div>
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <!-- ============================== NAV -->
+  <header class="nav" id="top">
+    <div class="container nav__inner">
+      <a class="brand" href="index.html" aria-label="Rassvet home">
+        <img src="assets/img/logo.svg" alt="" width="30" height="30">
+        <span>rassvet</span>
+      </a>
+      <nav class="nav__links" aria-label="Main">
+        <a href="multi-cloud.html" data-page="multi-cloud">Multi-cloud</a>
+        <a href="palette.html" data-page="palette">Palette</a>
+        <a href="monitors.html" data-page="monitors">Monitors</a>
+        <a href="extensions.html" data-page="extensions">Extensions</a>
+        <a href="design.html" data-page="design">Design</a>
+        <a href="index.html#start" data-page="start">Get started</a>
+      </nav>
+      <div class="nav__actions">
+        <button class="kbd-btn" data-open-palette aria-label="Open command palette">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Search</span><kbd>⌘K</kbd>
+        </button>
+        <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme">
+          <svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+        <a class="btn btn--sm btn--ghost hide-sm" href="https://github.com/botranvan/rassvet" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" class="gh"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0C17.3 4.3 18.3 4.6 18.3 4.6c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg>
+          GitHub
+        </a>
+        <button class="icon-btn burger" aria-label="Menu" aria-expanded="false">
+          <span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============================== MULTI-CLOUD -->
+    <section class="section section--page section--clouds" id="clouds">
+      <div class="container">
+        <header class="section__head reveal">
+          <span class="eyebrow">Multi-cloud</span>
+          <h1 class="page-title">Every cloud you run.<br><span class="grad">One dashboard, one session.</span></h1>
+          <p>Lab, staging and production. Hanoi and Saigon. Your own OpenStack and a customer's. Sign in to all of
+            them once and switch in one click. No second browser, no private windows, no signing in again.</p>
+        </header>
+
+        <div class="clouds">
+          <!-- Interactive demo -->
+          <div class="mc reveal" id="mc">
+            <div class="mc__tabs" aria-label="Browser tabs, one per cloud">
+              <div class="mc__tabstrip" id="mc-tabstrip"></div>
+              <span class="mc__hint">each tab keeps its own cloud</span>
+            </div>
+            <div class="mc__win">
+              <div class="mc__top">
+                <img src="assets/img/logo.svg" alt="" width="20" height="20"><b>rassvet</b>
+                <div class="mc__spacer"></div>
+                <div class="mc__menu-wrap">
+                  <button class="mc__btn mc__btn--cloud" id="mc-cloud-btn" aria-haspopup="menu" aria-expanded="false">
+                    <svg viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12 3.5 3.5 0 0 0 6 19h11.5z"/></svg>
+                    <span id="mc-cloud-name">Hanoi lab</span>
+                    <svg viewBox="0 0 24 24" class="chev"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+                  </button>
+                  <div class="mc__menu" id="mc-menu" role="menu" hidden>
+                    <div class="mc__menu-h">Signed in to</div>
+                    <ul id="mc-list"></ul>
+                    <button class="mc__add" id="mc-add" role="menuitem">
+                      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Sign in to another cloud
+                    </button>
+                  </div>
+                </div>
+                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="mc-project">admin</span></span>
+                <span class="mc__btn mc__btn--ghost hide-xs"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span id="mc-region">RegionOne</span></span>
+              </div>
+              <div class="mc__body" id="mc-body">
+                <div class="mc__title">
+                  <div>
+                    <h4 id="mc-heading">admin</h4>
+                    <p id="mc-sub">Signed in as admin on Hanoi lab, region RegionOne.</p>
+                  </div>
+                  <span class="mc__badge" id="mc-badge"><span class="led led--green"></span><span id="mc-release">2026.2 Hibiscus</span></span>
+                </div>
+                <div class="mc__quota" id="mc-quota"></div>
+                <div class="mc__svc" id="mc-svc"></div>
+              </div>
+
+              <!-- sign-in dialog for "Sign in to another cloud" -->
+              <div class="mc__dlg" id="mc-dlg" hidden>
+                <div class="mc__dlg-card">
+                  <h5>Sign in to another cloud</h5>
+                  <label>Cloud<span class="mc__field" id="mc-dlg-cloud">Production</span></label>
+                  <label>Username<span class="mc__field mc__field--type" id="mc-dlg-user"></span></label>
+                  <label>Password<span class="mc__field" id="mc-dlg-pass"></span></label>
+                  <div class="mc__dlg-actions"><span class="mc__ok" id="mc-dlg-ok">Sign in</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="mc__foot">
+              <span><kbd>Click</kbd> the cloud menu to switch, add, or sign out of one cloud</span>
+              <button class="mc__reset" id="mc-reset">Reset demo</button>
+            </div>
+          </div>
+
+          <!-- Benefits -->
+          <div class="clouds__copy">
+            <ul class="benefits">
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></div>
+                <div><h4>Switch in one click, no password</h4>
+                <p>Pick a cloud from <b>Signed in to</b> in the top bar, or press <kbd>⌘K</kbd> and type its name. You land on
+                  the same page in the other cloud, with the user and project you use there.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9h20M8 4v5"/></svg></div>
+                <div><h4>One tab per cloud, side by side</h4>
+                <p>Each browser tab remembers its own cloud. Keep lab on the left and production on the right, and compare
+                  flavors, images or security groups while you work.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+                <div><h4>Separate credentials, kept apart</h4>
+                <p>Every cloud has its own accounts and its own Keystone tokens, stored on the server and never mixed.
+                  When one token expires, only that cloud is signed out.</p></div>
+              </li>
+              <li class="reveal">
+                <div class="benefits__i"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
+                <div><h4>Leave one cloud or all of them</h4>
+                <p>The sign-out icon next to a cloud leaves only that cloud. <b>Sign out</b> in the account menu leaves every
+                  cloud at once.</p></div>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- How it works -->
+        <div class="flow">
+          <div class="flow__step reveal"><span class="flow__n">1</span><h4>Sign in once</h4><p>Pick a <b>Cloud</b> on the sign-in page and use a password or an application credential.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">2</span><h4>Add another cloud</h4><p>Cloud menu → <b>Sign in to another cloud</b>. Enter that cloud's credentials and stay signed in to the others.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">3</span><h4>Switch freely</h4><p>Cloud menu, <kbd>⌘K</kbd>, or a different tab. Every page reloads its data for the cloud you picked.</p></div>
+          <div class="flow__step reveal"><span class="flow__n">4</span><h4>Expiry handled</h4><p>When a cloud's sign-in expires, its tabs move to a cloud you are still signed in to.</p></div>
+        </div>
+
+        <!-- Use cases + under the hood -->
+        <div class="clouds__grid clouds__grid--two">
+          <div class="code reveal">
+            <div class="code__bar"><span>rassvet.toml: one block per cloud</span><button class="copy" data-copy="#clouds-src">Copy</button></div>
+<pre id="clouds-src"><code>[[<span class="t">cloud</span>]]
+<span class="k">id</span>       = <span class="s">"hanoi"</span>
+<span class="k">name</span>     = <span class="s">"Hanoi lab"</span>
+<span class="k">auth_url</span> = <span class="s">"https://keystone.hn.example.com:5000/v3"</span>
+<span class="k">default_domain</span> = <span class="s">"Default"</span>
+
+[[<span class="t">cloud</span>]]
+<span class="k">id</span>       = <span class="s">"saigon"</span>
+<span class="k">name</span>     = <span class="s">"Saigon lab"</span>
+<span class="k">auth_url</span> = <span class="s">"https://keystone.sg.example.com:5000/v3"</span>
+<span class="k">interface</span> = <span class="s">"public"</span>   <span class="c"># public | internal | admin</span></code></pre>
+          </div>
+
+          <div class="hood reveal">
+            <h3>Under the hood</h3>
+            <dl>
+              <div><dt><code>X-Rassvet-Cloud</code></dt><dd>Every request names its cloud, so each tab works on its own one. Downloads use <code>?rassvet_cloud=</code>.</dd></div>
+              <div><dt>Per-cloud tokens</dt><dd>The session lasts until its last cloud's token expires, within the idle and maximum limits.</dd></div>
+              <div><dt>Per-cloud microversions</dt><dd>Negotiated with each cloud, so clouds on different releases work together.</dd></div>
+              <div><dt>Shared via memcached</dt><dd>Multi-cloud sessions survive restarts and work behind a load balancer.</dd></div>
+            </dl>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <nav class="pager container" aria-label="More pages">
+      <a class="pager__link" href="index.html"><small>← Previous</small><b>Home</b></a>
+      <a class="pager__link pager__link--next" href="palette.html"><small>Next →</small><b>Command palette</b></a>
+    </nav>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="brand"><img src="assets/img/logo.svg" alt="" width="26" height="26"><span>rassvet</span></div>
+      <p>Next-gen OpenStack dashboard · Rust + React · Released under the license in the repository.</p>
+      <div class="footer__links">
+        <a href="https://github.com/botranvan/rassvet" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/botranvan/rassvet/tree/master/docs" target="_blank" rel="noopener">Docs</a>
+        <a href="#top">Back to top ↑</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ============================== REAL COMMAND PALETTE -->
+  <div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+    <div class="cmdk__backdrop" data-close></div>
+    <div class="cmdk__panel">
+      <div class="cmdk__input">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="cmdk-input" type="text" placeholder="Search sections, actions… try “mon” or “theme”" autocomplete="off" spellcheck="false">
+        <kbd>Esc</kbd>
+      </div>
+      <ul class="cmdk__list" id="cmdk-list" role="listbox"></ul>
+      <div class="cmdk__foot"><span>↑↓ to move</span><span>↵ to open</span><span class="r">This palette is a tiny tribute to the real one</span></div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden><img alt=""><button class="icon-btn" aria-label="Close">✕</button></div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="assets/js/main.js" defer></script>
+</body>
+</html>

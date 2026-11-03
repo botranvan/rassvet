@@ -43,16 +43,16 @@
   const nav = $(".nav");
   const progress = $(".progress");
   const links = $$(".nav__links a");
-  const sections = links.map((a) => $(a.getAttribute("href"))).filter(Boolean);
+  const page = document.body.dataset.page;
+  const startSec = $("#start");
   let ticking = false;
   const onScroll = () => {
     const y = scrollY;
     nav.classList.toggle("is-scrolled", y > 8);
     const max = document.documentElement.scrollHeight - innerHeight;
     progress.style.transform = `scaleX(${max > 0 ? y / max : 0})`;
-    let current = null;
-    for (const s of sections) if (s.getBoundingClientRect().top < innerHeight * 0.4) current = s.id;
-    links.forEach((a) => a.classList.toggle("is-active", a.getAttribute("href") === `#${current}`));
+    const inStart = startSec && startSec.getBoundingClientRect().top < innerHeight * 0.5;
+    links.forEach((a) => a.classList.toggle("is-active", a.dataset.page === (inStart ? "start" : page)));
     ticking = false;
   };
   addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
@@ -87,7 +87,7 @@
     requestAnimationFrame(step);
   };
   // Stagger siblings that reveal together.
-  $$(".bento, .principles, .ux-grid, .gallery, .steps, .hero__copy, .monitor-grid").forEach((g) =>
+  $$(".bento, .principles, .ux-grid, .gallery, .steps, .hero__copy, .monitor-grid, .flow, .benefits").forEach((g) =>
     $$(":scope > .reveal", g).forEach((el, i) => el.style.setProperty("--d", `${Math.min(i, 8) * 0.07}s`)));
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) {
@@ -138,15 +138,15 @@
   /* ------------------------------------- tilt, magnetic, spotlight */
   if (fine && !reduced) {
     const tilt = $("[data-tilt]");
-    const win = $(".window", tilt);
-    tilt.addEventListener("pointermove", (e) => {
+    const win = tilt && $(".window", tilt);
+    if (tilt) tilt.addEventListener("pointermove", (e) => {
       const r = tilt.getBoundingClientRect();
       const x = (e.clientX - r.left) / r.width - 0.5;
       const y = (e.clientY - r.top) / r.height - 0.5;
       win.style.setProperty("--ry", `${x * 10 - 4}deg`);
       win.style.setProperty("--rx", `${-y * 8 + 2}deg`);
     });
-    tilt.addEventListener("pointerleave", () => { win.style.removeProperty("--ry"); win.style.removeProperty("--rx"); });
+    if (tilt) tilt.addEventListener("pointerleave", () => { win.style.removeProperty("--ry"); win.style.removeProperty("--rx"); });
 
     $$(".magnetic").forEach((b) => {
       b.addEventListener("pointermove", (e) => {
@@ -176,7 +176,7 @@
   };
   const autoShots = () => { clearInterval(shotTimer); if (!reduced) shotTimer = setInterval(() => showShot(shotIdx + 1), 4500); };
   tabs.forEach((t, i) => t.addEventListener("click", () => { showShot(i); autoShots(); }));
-  autoShots();
+  if (tabs.length) autoShots();
 
   /* ------------------------------------------ bento palette list pulse */
   const tl = $$(".typing-list li");
@@ -255,21 +255,28 @@
       await sleep(350);
     }
   };
-  new IntersectionObserver((e, o) => { if (e[0].isIntersecting) { runDemo(); o.disconnect(); } }, { threshold: 0.3 }).observe($(".demo"));
+  if ($(".demo")) new IntersectionObserver((e, o) => { if (e[0].isIntersecting) { runDemo(); o.disconnect(); } }, { threshold: 0.3 }).observe($(".demo"));
 
   /* ---------------------------------------------- real command palette */
   const cmdk = $("#cmdk");
   const cInput = $("#cmdk-input");
   const cList = $("#cmdk-list");
-  const go = (id) => () => $(id).scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+  const go = (url) => () => {
+    const [file, hash] = url.split("#");
+    const here = (location.pathname.split("/").pop() || "index.html") === file;
+    const target = hash ? $("#" + hash) : null;
+    if (here && target) target.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+    else if (here) scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+    else location.href = url;
+  };
   const commands = [
-    { g: "Sections", i: "layers", l: "Features", k: "why overview bento", run: go("#features") },
-    { g: "Sections", i: "hash", l: "Command palette", k: "cmdk search keyboard ctrl k", run: go("#palette") },
-    { g: "Sections", i: "chart", l: "Monitors", k: "prometheus dashboards yaml charts cpu memory", run: go("#monitors") },
-    { g: "Sections", i: "code", l: "Extensions", k: "develop crate sdk plugin octavia magnum designate", run: go("#extensions") },
-    { g: "Sections", i: "net", l: "Architecture", k: "tokens keystone axum server", run: go("#architecture") },
-    { g: "Sections", i: "image", l: "Design & UI/UX", k: "colors palette leds fonts theme", run: go("#design") },
-    { g: "Sections", i: "arrow", l: "Get started", k: "build install cargo pnpm quick start", run: go("#start") },
+    { g: "Pages", i: "layers", l: "Home", k: "overview features start", run: go("index.html") },
+    { g: "Pages", i: "globe", l: "Multi-cloud", k: "several clouds switch sign in one session tabs", run: go("multi-cloud.html") },
+    { g: "Pages", i: "hash", l: "Command palette", k: "cmdk search keyboard ctrl k", run: go("palette.html") },
+    { g: "Pages", i: "chart", l: "Monitors", k: "prometheus dashboards yaml charts cpu memory", run: go("monitors.html") },
+    { g: "Pages", i: "code", l: "Extensions", k: "develop crate sdk plugin octavia magnum designate", run: go("extensions.html") },
+    { g: "Pages", i: "image", l: "Design & UI/UX", k: "colors palette leds fonts theme", run: go("design.html") },
+    { g: "Pages", i: "arrow", l: "Get started", k: "build install cargo pnpm quick start", run: go("index.html#start") },
     { g: "Actions", i: "sun", l: "Toggle dark / light theme", k: "dark theme light mode", run: toggleTheme },
     { g: "Actions", i: "code", l: "Copy build commands", k: "copy cargo build", run: () => copyText("cd ui && pnpm install && pnpm build && cd ..\ncargo build --release\n./target/release/rassvet --config rassvet.toml") },
     { g: "Links", i: "gh", l: "Open the repository on GitHub", k: "github source code repo", run: () => open("https://github.com/botranvan/rassvet", "_blank", "noopener") },
@@ -378,6 +385,7 @@
   let liveOn = false;
   let liveProgress = 0;
   const drawLive = () => {
+    if (!live) return;
     const d = sizeCanvas(live);
     const ctx = live.getContext("2d");
     const W = live.width, H = live.height;
@@ -412,6 +420,7 @@
   };
   const legendBody = $("#legend-body");
   const renderLegend = () => {
+    if (!legendBody) return;
     legendBody.innerHTML = data.map((s, i) => {
       const avg = s.reduce((a, b) => a + b, 0) / s.length;
       return `<tr style="opacity:${visible[i] ? 1 : 0.4}"><td><span class="sw" style="background:${colors[i]}"></span>${names[i]}</td><td>${s[s.length - 1].toFixed(1)}%</td><td>${avg.toFixed(1)}%</td><td>${Math.max(...s).toFixed(1)}%</td></tr>`;
@@ -434,7 +443,7 @@
     renderLegend(); drawLive();
   };
   renderLegend();
-  new IntersectionObserver((e) => {
+  if (live) new IntersectionObserver((e) => {
     liveOn = e[0].isIntersecting;
     if (liveOn && liveProgress < 1) {
       const t0 = performance.now();
@@ -457,7 +466,7 @@
     gaugeCur = v;
   };
   let gaugeTimer;
-  new IntersectionObserver((e) => {
+  if (gaugeFill) new IntersectionObserver((e) => {
     clearInterval(gaugeTimer);
     if (!e[0].isIntersecting) return;
     setGauge(63);
@@ -470,6 +479,7 @@
   let miniOff = 0;
   let miniVisible = false;
   const drawMini = () => {
+    if (!mini) return;
     const d = sizeCanvas(mini);
     const ctx = mini.getContext("2d");
     const W = mini.width, H = mini.height;
@@ -499,7 +509,7 @@
     drawMini();
     requestAnimationFrame(loopMini);
   };
-  new IntersectionObserver((e) => { miniVisible = e[0].isIntersecting; if (miniVisible) reduced ? drawMini() : loopMini(); }).observe(mini);
+  if (mini) new IntersectionObserver((e) => { miniVisible = e[0].isIntersecting; if (miniVisible) reduced ? drawMini() : loopMini(); }).observe(mini);
 
   let rz;
   addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { drawLive(); drawMini(); }, 120); });
@@ -638,7 +648,7 @@ ${k("export const")} cleanup: ${t("CleanupContribution")} = {
     el.addEventListener("click", () => showFile(el.dataset.file));
     el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showFile(el.dataset.file); } });
   });
-  showFile("lib");
+  if (extCode) showFile("lib");
 
   /* ------------------------------------------------------- terminal */
   $$(".term__tabs button").forEach((b) => b.addEventListener("click", () => {
@@ -680,7 +690,7 @@ ${k("export const")} cleanup: ${t("CleanupContribution")} = {
   lb.addEventListener("click", closeLightbox);
 
   /* ------------------------------------------------ multi-cloud demo */
-  {
+  if ($("#mc")) {
     const CLOUDS = {
       hanoi: { name: "Hanoi lab", user: "admin", project: "admin", region: "RegionOne", release: "2026.2 Hibiscus", c: "#22b5b0",
         quota: [["Instances", 11, 20], ["vCPUs", 12, 40], ["RAM", 21, 100, " GiB"], ["Floating IPs", 2, 5], ["Volumes", 6, 20], ["Networks", 7, 10]],
@@ -788,10 +798,9 @@ ${k("export const")} cleanup: ${t("CleanupContribution")} = {
     }, { threshold: 0.4 }).observe(mc);
 
     // Palette entries
-    commands.splice(2, 0, { g: "Sections", i: "globe", l: "Multi-cloud", k: "several clouds switch sign in one session tabs", run: go("#clouds") });
     Object.entries(CLOUDS).forEach(([id, c]) => commands.splice(commands.findIndex((x) => x.g === "Links"), 0, {
       g: "Demo clouds", i: "globe", l: `Switch demo cloud to ${c.name}`, k: `cloud switch ${id}`,
-      run: () => { go("#clouds")(); stopAuto(); if (!signed.includes(id)) { signed.push(id); } switchTo(id, `Switched to ${c.name}`); },
+      run: () => { $("#mc").scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" }); stopAuto(); if (!signed.includes(id)) { signed.push(id); } switchTo(id, `Switched to ${c.name}`); },
     }));
   }
 })();
