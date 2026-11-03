@@ -68,6 +68,8 @@ export type LoginRequest =
       domain?: string;
       username: string;
       password: string;
+      /** TOTP code, for accounts whose multi-factor rules require it. */
+      totp?: string;
     }
   | { method: "application_credential"; cloud: string; id: string; secret: string };
 

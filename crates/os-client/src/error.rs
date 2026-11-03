@@ -25,6 +25,12 @@ pub enum Error {
     /// Caller supplied an unusable value (e.g. a malformed resource id).
     #[error("{0}")]
     InvalidInput(String),
+
+    /// Keystone accepted some of the credentials but the user's multi-factor rules need
+    /// more methods (an `Openstack-Auth-Receipt` answer). `methods` are the rules: one of
+    /// these sets of methods must all be given, e.g. `[["password", "totp"]]`.
+    #[error("more authentication methods are required: {methods:?}")]
+    MfaRequired { methods: Vec<Vec<String>> },
 }
 
 impl Error {
@@ -33,6 +39,7 @@ impl Error {
             Error::Api { status, .. } => Some(*status),
             Error::Http(e) => e.status(),
             Error::InvalidInput(_) => Some(StatusCode::BAD_REQUEST),
+            Error::MfaRequired { .. } => Some(StatusCode::UNAUTHORIZED),
             _ => None,
         }
     }

@@ -1,4 +1,11 @@
-//! Keystone v3 authentication (password, application credential, token re-scope).
+//! Keystone v3 authentication (password, optionally with a TOTP passcode, application
+//! credential, token re-scope).
+//!
+//! Multi-factor accounts: when a user's MFA rules need more than the methods given, Keystone
+//! answers 401 with an `Openstack-Auth-Receipt` header and the rules in
+//! `required_auth_methods`; that becomes [`crate::Error::MfaRequired`]. Rassvet then asks for
+//! the code and sends password and TOTP together in one request, which satisfies a
+//! `["password", "totp"]` rule without keeping the receipt between requests.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,6 +20,8 @@ pub enum AuthMethod {
         username: String,
         password: String,
         user_domain: String,
+        /// A TOTP passcode, for accounts whose MFA rules require `["password", "totp"]`.
+        totp: Option<String>,
     },
     ApplicationCredential {
         id: String,
@@ -121,14 +130,26 @@ impl Keystone {
                 username,
                 password,
                 user_domain,
-            } => json!({
-                "methods": ["password"],
-                "password": {"user": {
-                    "name": username,
-                    "domain": {"name": user_domain},
-                    "password": password,
-                }}
-            }),
+                totp,
+            } => {
+                let mut identity = json!({
+                    "methods": ["password"],
+                    "password": {"user": {
+                        "name": username,
+                        "domain": {"name": user_domain},
+                        "password": password,
+                    }}
+                });
+                if let Some(code) = totp {
+                    identity["methods"] = json!(["password", "totp"]);
+                    identity["totp"] = json!({"user": {
+                        "name": username,
+                        "domain": {"name": user_domain},
+                        "passcode": code,
+                    }});
+                }
+                identity
+            }
             AuthMethod::ApplicationCredential { id, secret } => json!({
                 "methods": ["application_credential"],
                 "application_credential": {"id": id, "secret": secret}
@@ -150,7 +171,23 @@ impl Keystone {
             .http
             .post(format!("{}/v3/auth/tokens", self.base))
             .json(&json!({ "auth": auth }));
-        let resp = crate::trace::send("identity", req).await?;
+        let resp = crate::trace::exec("identity", req).await?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED
+            && resp.headers().contains_key("openstack-auth-receipt")
+        {
+            #[derive(Deserialize)]
+            struct Receipt {
+                #[serde(default)]
+                required_auth_methods: Vec<Vec<String>>,
+            }
+            let methods = resp
+                .json::<Receipt>()
+                .await
+                .map(|r| r.required_auth_methods)
+                .unwrap_or_default();
+            return Err(crate::Error::MfaRequired { methods });
+        }
+        let resp = crate::error::check("identity", resp).await?;
         let value = resp
             .headers()
             .get("x-subject-token")
@@ -265,6 +302,7 @@ mod tests {
                     username: "alice".into(),
                     password: "secret".into(),
                     user_domain: "Default".into(),
+                    totp: None,
                 },
                 &Scope::ProjectId("p1".into()),
             )
@@ -275,6 +313,70 @@ mod tests {
         assert!(t.has_role("Member"));
         assert!(!t.is_expired());
         assert!(t.catalog.has_service("compute", Some("RegionOne")));
+    }
+
+    fn alice(totp: Option<&str>) -> AuthMethod {
+        AuthMethod::Password {
+            username: "alice".into(),
+            password: "secret".into(),
+            user_domain: "Default".into(),
+            totp: totp.map(str::to_owned),
+        }
+    }
+
+    #[tokio::test]
+    async fn mfa_receipt_maps_to_mfa_required() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .insert_header("Openstack-Auth-Receipt", "rcpt")
+                    .set_body_json(json!({
+                        "receipt": {"methods": ["password"], "user": {"id": "u1"}},
+                        "required_auth_methods": [["password", "totp"]],
+                    })),
+            )
+            .mount(&server)
+            .await;
+        let ks = Keystone::new(reqwest::Client::new(), &server.uri());
+        let err = ks
+            .authenticate(&alice(None), &Scope::Unscoped)
+            .await
+            .unwrap_err();
+        match &err {
+            crate::Error::MfaRequired { methods } => {
+                assert_eq!(methods, &[vec!["password".to_string(), "totp".to_string()]])
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(err.status(), Some(reqwest::StatusCode::UNAUTHORIZED));
+    }
+
+    #[tokio::test]
+    async fn password_and_totp_in_one_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .and(body_partial_json(json!({"auth": {"identity": {
+                "methods": ["password", "totp"],
+                "password": {"user": {"name": "alice", "password": "secret"}},
+                "totp": {"user": {"name": "alice", "domain": {"name": "Default"}, "passcode": "123456"}},
+            }}})))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .insert_header("X-Subject-Token", "tok-mfa")
+                    .set_body_json(token_json()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let ks = Keystone::new(reqwest::Client::new(), &server.uri());
+        let t = ks
+            .authenticate(&alice(Some("123456")), &Scope::Unscoped)
+            .await
+            .unwrap();
+        assert_eq!(t.value, "tok-mfa");
     }
 
     #[tokio::test]

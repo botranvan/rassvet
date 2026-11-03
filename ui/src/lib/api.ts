@@ -4,6 +4,8 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public requestId?: string | null,
+    /** Machine-readable reason the UI reacts to, e.g. `totp_required`. */
+    public code?: string | null,
   ) {
     super(message);
   }
@@ -63,7 +65,7 @@ async function request<T>(method: string, path: string, body?: Json, signal?: Ab
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = data?.error ?? {};
-    throw new ApiError(res.status, err.message ?? res.statusText, err.request_id);
+    throw new ApiError(res.status, err.message ?? res.statusText, err.request_id, err.code);
   }
   return data as T;
 }

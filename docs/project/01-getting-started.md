@@ -14,8 +14,17 @@ is left, and find any page or resource quickly.
    - **App credential** — enter the **Credential ID** and **Secret** of an application credential
      (see [API access](12-api-access.md)); you land directly in the project it is bound to.
 4. Click **Sign in**.
+5. If your account uses two-step verification (Keystone TOTP), an **Authentication code** field appears.
+   Enter the code shown by your authenticator app (Google Authenticator, FreeOTP, Aegis…) and click
+   **Sign in** again. Your password stays filled in. If the code is refused, wait for the next one: each
+   code works only for a short time. The same happens when you sign in to another cloud.
 
 ![Sign-in page](../images/project/login.png)
+
+> Two-step verification is set up in Keystone by your operator. With `totp` among `[auth] methods` in
+> `keystone.conf`, they add a TOTP credential to your user (`openstack credential create --type totp <user> <secret>`) and require it at sign-in
+> (`openstack user set --enable-multi-factor-auth --multi-factor-auth-rule password,totp <user>`).
+> Rassvet then asks for the code. Application credentials don't need a code.
 
 Your session ends after a period of inactivity (one hour by default) or when you click **Sign out** in the
 account menu (which signs you out of every cloud).
