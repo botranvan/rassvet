@@ -660,6 +660,19 @@ const ADMIN_PARAMS: &[&str] = &["all_tenants", "all_projects"];
 
 // ---------------------------------------------------------------------------- calls
 
+/// Highest microversion known to work for specific endpoints, below the service target.
+/// Nova answers 404 when a method doesn't exist at the requested microversion, and
+/// `POST servers/{id}/remote-consoles` fails at 2.100 while 2.99 (what openstacksdk
+/// sends) works.
+fn cap_microversion(svc: Svc, path: &str, v: Microversion) -> Microversion {
+    let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let cap = match (svc, segs.as_slice()) {
+        (Compute, ["servers", _, "remote-consoles"]) => Some(Microversion::new(2, 99)),
+        _ => None,
+    };
+    cap.map_or(v, |c| v.min(c))
+}
+
 /// Send one request to a service (no allowlist check: for Rassvet's own typed routes).
 pub async fn call(
     st: &AppState,
@@ -677,7 +690,11 @@ pub async fn call(
             .unwrap_or_else(|_| ctx.auth_url.clone()),
         _ => ctx.endpoint(svc.catalog_type())?,
     };
-    let mv = st.versions.get(ctx, svc, &endpoint).await;
+    let mv = st
+        .versions
+        .get(ctx, svc, &endpoint)
+        .await
+        .map(|v| cap_microversion(svc, path, v));
     let encoded: Vec<String> = path
         .trim_matches('/')
         .split('/')
@@ -898,6 +915,24 @@ pub async fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_console_microversion_cap() {
+        let id = "c09d0551-f5cf-4edc-a508-ad477d1e23d2";
+        let path = format!("servers/{id}/remote-consoles");
+        assert_eq!(
+            cap_microversion(Compute, &path, Microversion::new(2, 100)),
+            Microversion::new(2, 99)
+        );
+        assert_eq!(
+            cap_microversion(Compute, &path, Microversion::new(2, 96)),
+            Microversion::new(2, 96)
+        );
+        assert_eq!(
+            cap_microversion(Compute, &format!("servers/{id}"), Microversion::new(2, 100)),
+            Microversion::new(2, 100)
+        );
+    }
 
     #[test]
     fn allowlist() {
