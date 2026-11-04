@@ -40,7 +40,7 @@ max_files = 14            # rotated files kept, oldest deleted (0 = keep all)
 # One block per OpenStack cloud the dashboard can log in to.
 [[cloud]]
 id = "lab"
-name = "Lab cloud"
+name = "Lab cloud"           # shown in the cloud picker and as the browser tab's title
 auth_url = "https://keystone.example.com:5000/v3"
 # URL put into downloaded openrc / clouds.yaml (defaults to the catalog's public identity endpoint)
 # public_auth_url = "https://keystone.example.com:5000/v3"
