@@ -3,6 +3,7 @@ import { Picker } from "@/components/Picker";
 import { Button, ErrorNotice, Field, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { type CloudInfo, type LoginRequest, useClouds, useLogin, useServerVersion } from "@/lib/session";
+import { useDocumentTitle } from "@/lib/title";
 import { cn } from "@/lib/utils";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { tr, trx } from "@/lib/i18n";
@@ -13,6 +14,9 @@ export default function Login() {
   const clouds = useClouds();
   const version = useServerVersion();
   const login = useLogin();
+  // Before sign-in, the title is the cloud picked in the form.
+  const [picked, setPicked] = useState<CloudInfo | undefined>();
+  useDocumentTitle(picked?.name);
 
   return (
     <div className="grid min-h-full lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,1fr)]">
@@ -28,6 +32,7 @@ export default function Login() {
             clouds={clouds.data ?? []}
             mutation={login}
             error={clouds.error}
+            onCloudChange={setPicked}
             intro={(selected) => (
               <p className="mt-1 text-sm text-muted">
                 {trx("Use your OpenStack account{v}.", { v: selected ? tr(" on {name}", { name: selected.name }) : "" })}
@@ -52,12 +57,15 @@ export function SignInForm({
   error,
   intro,
   submitLabel = tr("Sign in"),
+  onCloudChange,
 }: {
   clouds: CloudInfo[];
   mutation: { mutate: (req: LoginRequest) => void; isPending: boolean; error: Error | null };
   error?: Error | null;
   intro?: (selected: CloudInfo | undefined) => ReactNode;
   submitLabel?: string;
+  /** Told which cloud is picked (the sign-in page shows it as the tab's title). */
+  onCloudChange?: (cloud: CloudInfo | undefined) => void;
 }) {
   const [method, setMethod] = useState<Method>("password");
   const [cloud, setCloud] = useState("");
@@ -74,6 +82,10 @@ export function SignInForm({
   useEffect(() => {
     if (!cloud && list[0]) setCloud(list[0].id);
   }, [cloud, list]);
+  useEffect(() => {
+    onCloudChange?.(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.name]);
 
   const errorCode = mutation.error instanceof ApiError ? mutation.error.code : null;
   useEffect(() => {

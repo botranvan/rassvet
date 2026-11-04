@@ -4,6 +4,7 @@ import { ErrorNotice } from "@/components/ui";
 import { loadExtensionRoutes, useExtensionRouteElements } from "@/extensions";
 import AppShell from "@/layout/AppShell";
 import { useNav, useSession } from "@/lib/session";
+import { useDocumentTitle } from "@/lib/title";
 import ChangePassword from "@/pages/account/ChangePassword";
 import AdminOverview from "@/pages/admin/AdminOverview";
 import Endpoints from "@/pages/admin/identity/Endpoints";
@@ -87,6 +88,8 @@ export default function App() {
 }
 
 function Authed({ session }: { session: NonNullable<ReturnType<typeof useSession>["data"]> }) {
+  // The tab's title follows the cloud it is signed in to (and moves with it).
+  useDocumentTitle(session.cloud.name);
   const nav = useNav(true);
   const extIds = nav.data?.extensions.map((e) => e.id) ?? [];
   const exts = useQuery({
