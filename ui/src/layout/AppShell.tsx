@@ -22,6 +22,7 @@ import { tr, trx } from "@/lib/i18n";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { CommandPalette, PALETTE_KEY, usePaletteShortcut } from "@/components/CommandPalette";
 import { isWide, onToggleSidebar, readSidebarHidden, saveSidebarHidden } from "@/lib/sidebar";
+import { platformInfo } from "@/platforms";
 
 /** UI mode follows the URL: everything under /admin is the cloud-admin view. */
 export function useMode(): NavSection {
@@ -58,6 +59,8 @@ export default function AppShell({ session }: { session: SessionInfo }) {
   useEffect(() => onToggleSidebar(toggle), [toggle]);
 
   const items = nav.data?.items.filter((i) => i.section === mode) ?? [];
+  // vCenter / ESXi / VCF: no projects, regions or OpenStack resources to search.
+  const openstack = session.platform === "openstack";
   const cloudLabel = session.version ? `${session.cloud.name} - rassvet v${session.version}` : session.cloud.name;
   const current = items
     .filter((i) => location.pathname.startsWith(i.path))
@@ -157,7 +160,7 @@ export default function AppShell({ session }: { session: SessionInfo }) {
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            <button
+            {openstack && <button
               type="button"
               onClick={() => setPalette(true)}
               aria-label={tr("Search and commands")}
@@ -167,14 +170,14 @@ export default function AppShell({ session }: { session: SessionInfo }) {
               <Icon name="search" className="size-4" />
               <span className="hidden md:inline">{tr("Search")}</span>
               <kbd className="hidden rounded border border-line bg-panel px-1 font-mono text-[11px] md:inline">{PALETTE_KEY}</kbd>
-            </button>
+            </button>}
             <CloudSwitcher session={session} />
-            <ProjectSwitcher session={session} />
+            {openstack && <ProjectSwitcher session={session} />}
             <RegionSwitcher session={session} />
             <UserMenu session={session} />
           </div>
         </header>
-        <CommandPalette session={session} open={palette} onClose={() => setPalette(false)} />
+        {openstack && <CommandPalette session={session} open={palette} onClose={() => setPalette(false)} />}
         <main className="flex-1 overflow-y-auto">
           <div className={cn("mx-auto px-4 py-8 lg:px-8", rail ? "lg:max-w-none" : "max-w-7xl")}>
             <Outlet />
@@ -370,7 +373,11 @@ function CloudSwitcher({ session }: { session: SessionInfo }) {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{c.name}</span>
                       <span className="block truncate text-xs font-normal text-muted">
-                        {c.project ? `${c.user.name} · ${c.project.name}` : c.user.name}
+                        {c.project
+                          ? `${c.user.name} · ${c.project.name}`
+                          : c.platform && c.platform !== "openstack"
+                            ? `${c.user.name} · ${platformInfo(c.platform).label}`
+                            : c.user.name}
                       </span>
                     </span>
                     {c.id === session.cloud.id && <Icon name="check" className="ml-auto size-3.5 shrink-0" />}
@@ -544,9 +551,13 @@ function UserMenu({ session }: { session: SessionInfo }) {
             {session.user.domain && (
               <p className="text-xs text-muted">{trx("Domain {name}", { name: session.user.domain.name })}</p>
             )}
-            <p className="text-xs text-muted">
-              {tr("Roles:")}{" "}{session.roles.map((r) => r.name).join(", ") || tr("none")}
-            </p>
+            {session.platform === "openstack" ? (
+              <p className="text-xs text-muted">
+                {tr("Roles:")}{" "}{session.roles.map((r) => r.name).join(", ") || tr("none")}
+              </p>
+            ) : (
+              <p className="text-xs text-muted">{platformInfo(session.platform).label}</p>
+            )}
           </div>
           <div className="my-1 border-t border-line" />
           <div className="grid grid-cols-3 gap-1 p-1">
@@ -567,6 +578,7 @@ function UserMenu({ session }: { session: SessionInfo }) {
           <div className="my-1 border-t border-line" />
           <LanguagePicker />
           <div className="my-1 border-t border-line" />
+          {session.platform === "openstack" && <>
           <Link
             to="/account/profile"
             onClick={close}
@@ -583,6 +595,7 @@ function UserMenu({ session }: { session: SessionInfo }) {
             <Icon name="key" className="text-muted" />
             {tr("Change password")}
           </Link>
+          </>}
           <MenuItem onClick={() => logout.mutate(undefined)}>
             <Icon name="log-out" className="text-muted" />
             {tr("Sign out")}

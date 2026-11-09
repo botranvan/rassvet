@@ -72,6 +72,7 @@ import AvailabilityZones from "@/pages/admin/compute/AvailabilityZones";
 import Metadefs, { MetadefDetail } from "@/pages/admin/compute/Metadefs";
 import NotBuilt from "@/pages/NotBuilt";
 import Overview from "@/pages/Overview";
+import PlatformOverview from "@/platforms/Overview";
 
 export default function App() {
   const session = useSession();
@@ -99,6 +100,17 @@ function Authed({ session }: { session: NonNullable<ReturnType<typeof useSession
     staleTime: Infinity,
   });
   const extRoutes = useExtensionRouteElements(exts.data ?? [], session.is_admin);
+
+  // vCenter, ESXi, VCF: their own pages (an overview for now), none of OpenStack's.
+  if (session.platform !== "openstack")
+    return (
+      <Routes>
+        <Route element={<AppShell session={session} />}>
+          <Route index element={<PlatformOverview session={session} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    );
 
   return (
     <Routes>

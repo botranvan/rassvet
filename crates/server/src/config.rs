@@ -101,11 +101,44 @@ impl MemcachedConfig {
     }
 }
 
+/// The kind of cloud a `[[cloud]]` block is: each one is reached with its own client
+/// (`crates/clients/<platform>`) and has its own sign-in form in the UI.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    /// OpenStack: Keystone at `auth_url`.
+    #[default]
+    Openstack,
+    /// VMware vCenter Server: the vSphere Automation REST API at `auth_url`.
+    Vcenter,
+    /// A standalone VMware ESXi host: the vim25 SOAP API at `auth_url`.
+    Esxi,
+    /// VMware Cloud Foundation: the SDDC Manager API at `auth_url`.
+    Vcf,
+}
+
+impl Platform {
+    pub fn label(self) -> &'static str {
+        match self {
+            Platform::Openstack => "OpenStack",
+            Platform::Vcenter => "VMware vCenter",
+            Platform::Esxi => "VMware ESXi",
+            Platform::Vcf => "VMware Cloud Foundation",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CloudConfig {
     pub id: String,
     pub name: String,
+    /// openstack (default) | vcenter | esxi | vcf.
+    #[serde(default)]
+    pub platform: Platform,
+    /// Where users sign in: Keystone (OpenStack), the vCenter / ESXi host, or the SDDC
+    /// Manager (VCF). `url` is accepted as well.
+    #[serde(alias = "url")]
     pub auth_url: String,
     /// Keystone URL written into downloaded `openrc` / `clouds.yaml` files. Defaults to the
     /// public identity endpoint from the catalog, then to `auth_url`.
@@ -178,6 +211,21 @@ impl Config {
                 );
             }
         }
+        for c in cfg
+            .clouds
+            .iter()
+            .filter(|c| c.platform != Platform::Openstack)
+        {
+            if !c.extensions.is_empty() {
+                bail!(
+                    "[[cloud]] {:?}: extensions are only available on OpenStack clouds",
+                    c.id
+                );
+            }
+            if !(c.auth_url.starts_with("https://") || c.auth_url.starts_with("http://")) {
+                bail!("[[cloud]] {:?}: url must start with https://", c.id);
+            }
+        }
         cfg.log.validate()?;
         Ok(cfg)
     }
@@ -215,6 +263,43 @@ prometheus_url = "http://prom:9090"
         .unwrap();
         let m = &cfg.clouds[0].extensions["monitors"];
         assert_eq!(m["prometheus_url"].as_str(), Some("http://prom:9090"));
+    }
+
+    #[test]
+    fn parses_platforms() {
+        let cfg: Config = toml::from_str(
+            r#"
+[[cloud]]
+id = "os"
+name = "OpenStack"
+auth_url = "http://keystone/v3"
+
+[[cloud]]
+id = "vc"
+name = "vCenter"
+platform = "vcenter"
+url = "https://vcenter.example.com"
+
+[[cloud]]
+id = "vcf"
+name = "VCF"
+platform = "vcf"
+auth_url = "https://sddc-manager.example.com"
+"#,
+        )
+        .unwrap();
+        let kinds: Vec<Platform> = cfg.clouds.iter().map(|c| c.platform).collect();
+        assert_eq!(
+            kinds,
+            [Platform::Openstack, Platform::Vcenter, Platform::Vcf]
+        );
+        assert_eq!(cfg.clouds[1].auth_url, "https://vcenter.example.com");
+        assert!(
+            toml::from_str::<Config>(
+                "[[cloud]]\nid=\"x\"\nname=\"x\"\nplatform=\"hyperv\"\nurl=\"https://h\"\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

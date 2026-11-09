@@ -1,0 +1,19 @@
+[package]
+name = "rassvet-vcf-client"
+description = "VMware Cloud Foundation client: SDDC Manager API tokens and inventory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true

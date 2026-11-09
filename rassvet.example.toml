@@ -37,7 +37,8 @@ max_files = 14            # rotated files kept, oldest deleted (0 = keep all)
 # # secret_key_file = "/etc/rassvet/session.key"
 # # allow_unencrypted = false          # true stores tokens in plain text (not recommended)
 
-# One block per OpenStack cloud the dashboard can log in to.
+# One block per cloud the dashboard can log in to. `platform` picks how Rassvet talks to it
+# (and the sign-in form): openstack (default) | vcenter | esxi | vcf.
 [[cloud]]
 id = "lab"
 name = "Lab cloud"           # shown in the cloud picker and as the browser tab's title
@@ -69,3 +70,28 @@ insecure_tls = false
 # # list). Changes are picked up within seconds. Without it, the built-in panels are used
 # # (extensions/monitors/panels/default.yaml: copy it there to start from).
 # monitor_panels_paths = "/etc/rassvet/monitor-panels"
+
+# VMware vCenter Server (7.0 U2 or later): users sign in with a vCenter Single Sign-On account
+# (administrator@vsphere.local, DOMAIN\user). Only id, name, platform, url, ca_file and
+# insecure_tls apply to VMware clouds.
+# [[cloud]]
+# id = "dc1"
+# name = "DC1 vCenter"
+# platform = "vcenter"
+# url = "https://vcenter.example.com"
+# # ca_file = "/etc/ssl/certs/vmca-root.pem"   # the VMCA root of a self-signed vCenter
+# insecure_tls = false
+
+# A standalone VMware ESXi host (local account, e.g. root).
+# [[cloud]]
+# id = "esx01"
+# name = "esx01"
+# platform = "esxi"
+# url = "https://esx01.example.com"
+
+# VMware Cloud Foundation: the SDDC Manager of the instance.
+# [[cloud]]
+# id = "vcf"
+# name = "VCF"
+# platform = "vcf"
+# url = "https://sddc-manager.example.com"
