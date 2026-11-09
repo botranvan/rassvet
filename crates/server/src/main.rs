@@ -12,6 +12,7 @@ mod logging;
 mod memcache;
 mod metadefs;
 mod nav;
+mod platform;
 mod session;
 mod state;
 mod swift;

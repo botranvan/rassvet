@@ -1,14 +1,16 @@
-import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { Picker } from "@/components/Picker";
-import { Button, ErrorNotice, Field, Input } from "@/components/ui";
-import { ApiError } from "@/lib/api";
-import { type CloudInfo, type LoginRequest, useClouds, useLogin, useServerVersion } from "@/lib/session";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from "react";
+import { ErrorNotice, Icon } from "@/components/ui";
+import { type CloudInfo, type Platform, useClouds, useLogin, useServerVersion } from "@/lib/session";
 import { useDocumentTitle } from "@/lib/title";
 import { cn } from "@/lib/utils";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { tr, trx } from "@/lib/i18n";
-
-type Method = "password" | "application_credential";
+import { PLATFORMS, platformInfo } from "@/platforms";
+import { PlatformPicker } from "@/platforms/PlatformPicker";
+import type { PlatformSignInProps } from "@/platforms/types";
+import OpenStackSignInForm from "@/platforms/openstack/SignInForm";
+import VsphereSignInForm from "@/platforms/vsphere/SignInForm";
+import VcfSignInForm from "@/platforms/vcf/SignInForm";
 
 export default function Login() {
   const clouds = useClouds();
@@ -33,9 +35,14 @@ export default function Login() {
             mutation={login}
             error={clouds.error}
             onCloudChange={setPicked}
-            intro={(selected) => (
+            intro={(selected, platform) => (
               <p className="mt-1 text-sm text-muted">
-                {trx("Use your OpenStack account{v}.", { v: selected ? tr(" on {name}", { name: selected.name }) : "" })}
+                {platform
+                  ? trx("Use your {platform} account{v}.", {
+                      platform: platformInfo(platform).label,
+                      v: selected ? tr(" on {name}", { name: selected.name }) : "",
+                    })
+                  : tr("Choose the kind of cloud to sign in to.")}
               </p>
             )}
           />
@@ -48,8 +55,10 @@ export default function Login() {
 }
 
 /**
- * Cloud, method and credentials. Used by the sign-in page and by "Sign in to another cloud"
- * (`mutation` is then `useAddCloud`), so both work the same way.
+ * Sign-in in two steps: the cloud platform (OpenStack, vCenter, ESXi, VCF; skipped when only
+ * one is configured), then that platform's own form (`platforms/<platform>/SignInForm.tsx`).
+ * Used by the sign-in page and by "Sign in to another cloud" (`mutation` is then
+ * `useAddCloud`), so both work the same way.
  */
 export function SignInForm({
   clouds: list,
@@ -60,225 +69,81 @@ export function SignInForm({
   onCloudChange,
 }: {
   clouds: CloudInfo[];
-  mutation: { mutate: (req: LoginRequest) => void; isPending: boolean; error: Error | null };
+  mutation: PlatformSignInProps["mutation"] & { reset?: () => void };
   error?: Error | null;
-  intro?: (selected: CloudInfo | undefined) => ReactNode;
+  intro?: (selected: CloudInfo | undefined, platform: Platform | undefined) => ReactNode;
   submitLabel?: string;
   /** Told which cloud is picked (the sign-in page shows it as the tab's title). */
   onCloudChange?: (cloud: CloudInfo | undefined) => void;
 }) {
-  const [method, setMethod] = useState<Method>("password");
-  const [cloud, setCloud] = useState("");
-  const [domain, setDomain] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [credId, setCredId] = useState("");
-  const [credSecret, setCredSecret] = useState("");
-  // Two-factor accounts: Keystone wants a TOTP code with the password (asked for by the server).
-  const [totp, setTotp] = useState("");
-  const [askTotp, setAskTotp] = useState(false);
-
-  const selected = list.find((c) => c.id === cloud) ?? list[0];
+  const offered = PLATFORMS.filter((p) => list.some((c) => c.platform === p.id));
+  const [chosen, setChosen] = useState<Platform | undefined>();
+  const platform = chosen ?? (offered.length === 1 ? offered[0].id : undefined);
+  const [picked, setPicked] = useState<CloudInfo | undefined>();
+  const pick = (c: CloudInfo | undefined) => {
+    setPicked(c);
+    onCloudChange?.(c);
+  };
   useEffect(() => {
-    if (!cloud && list[0]) setCloud(list[0].id);
-  }, [cloud, list]);
-  useEffect(() => {
-    onCloudChange?.(selected);
+    if (!platform) pick(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, selected?.name]);
-
-  const errorCode = mutation.error instanceof ApiError ? mutation.error.code : null;
-  useEffect(() => {
-    if (errorCode === "totp_required" || errorCode === "totp_invalid") setAskTotp(true);
-    // A refused code can't be used again: clear it for the next one.
-    if (errorCode === "totp_invalid") setTotp("");
-  }, [mutation.error, errorCode]);
-
-  /** Another account or cloud: the code asked for belonged to the previous one. */
-  const resetTotp = () => {
-    setAskTotp(false);
-    setTotp("");
+  }, [platform]);
+  /** Another platform: the previous one's error doesn't apply. */
+  const choose = (p: Platform | undefined) => {
+    mutation.reset?.();
+    setChosen(p);
   };
 
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    mutation.mutate(
-      method === "password"
-        ? {
-            method,
-            cloud: selected.id,
-            domain: domain || undefined,
-            username,
-            password,
-            totp: askTotp && totp.trim() ? totp.replace(/\s/g, "") : undefined,
-          }
-        : { method, cloud: selected.id, id: credId, secret: credSecret },
-    );
-  }
+  const props: PlatformSignInProps = {
+    clouds: list.filter((c) => c.platform === platform),
+    mutation,
+    error,
+    submitLabel,
+    onCloudChange: pick,
+  };
+  const info = platform && platformInfo(platform);
 
   return (
     <>
-      {intro?.(selected)}
+      {intro?.(platform ? picked : undefined, platform)}
 
-      <div role="tablist" className={cn("grid grid-cols-2 rounded-lg bg-ink/5 p-1 text-sm", intro && "mt-7")}>
-        {(
-          [
-            ["password", tr("Password")],
-            ["application_credential", tr("App credential")],
-          ] as [Method, string][]
-        ).map(([m, label]) => (
-          <button
-            key={m}
-            type="button"
-            role="tab"
-            aria-selected={method === m}
-            onClick={() => {
-              setMethod(m);
-              resetTotp();
-            }}
-            className={cn(
-              "rounded-md px-3 py-1.5 font-medium text-muted transition-colors",
-              method === m && "bg-panel text-ink shadow-sm",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={submit} className="mt-6 space-y-4">
-        {list.length > 1 && (
-          <Field label={tr("Cloud")}>
-            {(id) => (
-              <Picker
-                id={id}
-                value={selected?.id ?? ""}
-                onChange={(v) => {
-                  setCloud(v);
-                  resetTotp();
-                }}
-                options={list.map((c) => ({ value: c.id, label: c.name, icon: "server" }))} />
-            )}
-          </Field>
-        )}
-
-        {method === "password" ? (
-          <>
-            <Field label={tr("Domain")}>
-              {(id) => (
-                <Input
-                  id={id}
-                  value={domain}
-                  onChange={(e) => {
-                    setDomain(e.target.value);
-                    resetTotp();
-                  }}
-                  placeholder={selected?.default_domain ?? tr("Default")}
-                  autoComplete="organization"
-                />
+      {!platform || !info ? (
+        <div className={cn(intro && "mt-7")}>
+          <p className="mb-3 text-sm font-medium">{tr("Cloud platform")}</p>
+          {offered.length > 0 ? (
+            <PlatformPicker clouds={list} onPick={choose} />
+          ) : (
+            !error && <p className="text-sm text-muted">{tr("Loading…")}</p>
+          )}
+          <ErrorNotice error={error} className="mt-4" />
+        </div>
+      ) : (
+        <>
+          {offered.length > 1 && (
+            <button
+              type="button"
+              onClick={() => choose(undefined)}
+              className={cn(
+                "inline-flex max-w-full items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-sm hover:border-cable/50 hover:bg-surface",
+                intro && "mt-6",
               )}
-            </Field>
-            <Field label={tr("Username")}>
-              {(id) => (
-                <Input
-                  id={id}
-                  required
-                  autoFocus
-                  value={username}
-                  onChange={(e) => {
-                    setUsername(e.target.value);
-                    resetTotp();
-                  }}
-                  autoComplete="username"
-                />
-              )}
-            </Field>
-            <Field label={tr("Password")}>
-              {(id) => (
-                <Input
-                  id={id}
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              )}
-            </Field>
-            {askTotp && (
-              <Field
-                label={tr("Authentication code")}
-                hint={tr("Your account uses two-step verification: enter the code shown by your authenticator app.")}
-              >
-                {(id) => (
-                  <Input
-                    id={id}
-                    required
-                    autoFocus
-                    value={totp}
-                    onChange={(e) => setTotp(e.target.value)}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    pattern="[0-9 ]{4,12}"
-                    maxLength={12}
-                    placeholder="123456"
-                    className="font-mono tracking-widest"
-                  />
-                )}
-              </Field>
-            )}
-          </>
-        ) : (
-          <>
-            <Field label={tr("Credential ID")}>
-              {(id) => (
-                <Input
-                  id={id}
-                  required
-                  value={credId}
-                  onChange={(e) => setCredId(e.target.value)}
-                  className="font-mono text-[13px]"
-                  spellCheck={false}
-                />
-              )}
-            </Field>
-            <Field label={tr("Secret")} hint={tr("Application credentials are bound to a single project.")}>
-              {(id) => (
-                <Input
-                  id={id}
-                  type="password"
-                  required
-                  value={credSecret}
-                  onChange={(e) => setCredSecret(e.target.value)}
-                  autoComplete="off"
-                />
-              )}
-            </Field>
-          </>
-        )}
-
-        {/* "Enter the code" is a step, not an error: the code field's hint says it. */}
-        <ErrorNotice
-          error={
-            errorCode === "totp_required"
-              ? error
-              : errorCode === "totp_invalid"
-                ? new Error(tr("The password or the authentication code was not accepted. Wait for a new code and try again."))
-                : (mutation.error ?? error)
-          }
-        />
-
-        <Button
-          type="submit"
-          variant="primary"
-          busy={mutation.isPending}
-          disabled={!selected}
-          className="h-10 w-full"
-        >
-          {submitLabel}
-        </Button>
-      </form>
+              title={tr("Choose another cloud platform")}
+            >
+              <Icon name="arrow-left" className="size-4 shrink-0 text-muted" />
+              <Icon name={info.icon} className="size-4 shrink-0 text-muted" />
+              <span className="truncate font-medium">{info.label}</span>
+              <span className="shrink-0 text-muted">· {tr("Change")}</span>
+            </button>
+          )}
+          {platform === "openstack" ? (
+            <OpenStackSignInForm key={platform} {...props} />
+          ) : platform === "vcf" ? (
+            <VcfSignInForm key={platform} {...props} />
+          ) : (
+            <VsphereSignInForm key={platform} {...props} platform={platform} />
+          )}
+        </>
+      )}
     </>
   );
 }
@@ -371,10 +236,10 @@ function RackPanel() {
 
       <div className="relative z-10 max-w-md p-10">
         <p className="text-2xl leading-snug font-medium text-white">
-          {tr("Run your OpenStack cloud from one place.")}
+          {tr("Run your OpenStack and VMware clouds from one place.")}
         </p>
         <p className="mt-3 text-sm text-rack-dim">
-          {tr("Compute, images, networks, volumes and secrets across every project and region you have access to.")}
+          {tr("OpenStack, VMware vCenter, ESXi and VMware Cloud Foundation: sign in to each and switch between them without signing in again.")}
         </p>
       </div>
     </aside>

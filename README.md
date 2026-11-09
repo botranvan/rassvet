@@ -1,6 +1,6 @@
 # rassvet — next-gen OpenStack dashboard
 
-Single-binary dashboard for OpenStack, written in Rust with an embedded React UI.
+Single-binary dashboard for OpenStack (and VMware vCenter / ESXi / Cloud Foundation), written in Rust with an embedded React UI.
 *Rassvet* (рассвет) means "dawn".
 
 - **Backend**: Rust (axum + tokio + reqwest). Keystone tokens stay on the server; the browser gets an opaque HttpOnly session cookie.
@@ -8,6 +8,12 @@ Single-binary dashboard for OpenStack, written in Rust with an embedded React UI
 - **OpenStack**: targets 2026.2 (Hibiscus) APIs, oldest supported release 2026.1 (Gazpacho). Microversions are negotiated per cloud.
 - **Core services**: Keystone, Glance, Nova, Placement, Neutron, Cinder, Barbican.
 - **Extensions**: other services (Octavia load balancers, Magnum Kubernetes clusters, Designate DNS, and Monitors: instance and physical server dashboards from Prometheus, defined in YAML) are compile-time extension crates under `extensions/`.
+
+- **Cloud platforms**: each `[[cloud]]` has a `platform`: `openstack` (default), `vcenter`, `esxi` or `vcf`.
+  Signing in is two steps: pick the platform, then fill in that platform's form (Keystone password / TOTP /
+  application credential for OpenStack; user name and password for VMware). Each platform has its own client
+  crate under `crates/clients/`. VMware clouds show an overview (product, VMs, hosts, clusters, datastores…)
+  for now; their resource pages come next.
 
 ## Documentation
 
@@ -17,14 +23,18 @@ project users ([`docs/project`](docs/project)) and for cloud administrators ([`d
 ## Layout
 
 ```
-crates/os-client     OpenStack client: Keystone, Glance, generic REST, catalog, microversions, API errors
+crates/clients/openstack  OpenStack client (rassvet-os-client): Keystone, Glance, generic REST, catalog, microversions, API errors
+crates/clients/vsphere    VMware vSphere client: vCenter Automation REST API, ESXi vim25 SOAP sign-in
+crates/clients/vcf        VMware Cloud Foundation client: SDDC Manager tokens and inventory
 crates/ext-api       Extension contract (Extension trait, NavItem, RequestContext, ApiError)
 crates/server        rassvet binary: config, sessions, core API, embedded UI
+crates/server/src/platform  Sign-in, sign-out and overview of non-OpenStack clouds (vsphere.rs, vcf.rs)
 extensions/octavia   Reference extension: Rust crate + ui/ (React pages)
 extensions/magnum    Kubernetes clusters (Magnum): gateway, kubeconfig signing + ui/
 extensions/designate DNS zones (Designate): gateway, zone file import / export + ui/
 extensions/monitors  Monitors: dashboards from Prometheus; panels/default.yaml = built-in panels + ui/
 ui/                  Host UI (Vite + React); `@rassvet/sdk` is the API exposed to extension UIs
+ui/src/platforms/    Platform picker and one folder per platform (openstack/, vsphere/, vcf/): sign-in forms, overview
 ```
 
 ## Build

@@ -5,14 +5,33 @@ use rassvet_ext_api::Extension;
 use rassvet_os_client::Keystone;
 
 use crate::{
-    config::{CloudConfig, Config},
+    config::{CloudConfig, Config, Platform},
     session::{SessionLimits, SessionStore},
 };
 
 pub struct Cloud {
     pub cfg: CloudConfig,
     pub http: reqwest::Client,
-    pub keystone: Keystone,
+    /// The platform's client (one crate per platform under `crates/clients/`).
+    pub client: Client,
+}
+
+/// How Rassvet talks to a cloud, by platform.
+pub enum Client {
+    Openstack(Keystone),
+    /// vCenter and standalone ESXi.
+    Vsphere(rassvet_vsphere_client::Vsphere),
+    Vcf(rassvet_vcf_client::Vcf),
+}
+
+impl Cloud {
+    /// Keystone of an OpenStack cloud.
+    pub fn keystone(&self) -> Option<&Keystone> {
+        match &self.client {
+            Client::Openstack(k) => Some(k),
+            _ => None,
+        }
+    }
 }
 
 pub struct Inner {
@@ -41,8 +60,15 @@ pub fn build(config: Config, extensions: Vec<Arc<dyn Extension>>) -> anyhow::Res
         };
         let http = rassvet_os_client::http_client(c.insecure_tls, ca.as_deref())
             .with_context(|| format!("HTTP client for cloud '{}'", c.id))?;
+        let client = match c.platform {
+            Platform::Openstack => Client::Openstack(Keystone::new(http.clone(), &c.auth_url)),
+            Platform::Vcenter | Platform::Esxi => Client::Vsphere(
+                rassvet_vsphere_client::Vsphere::new(http.clone(), &c.auth_url),
+            ),
+            Platform::Vcf => Client::Vcf(rassvet_vcf_client::Vcf::new(http.clone(), &c.auth_url)),
+        };
         clouds.push(Arc::new(Cloud {
-            keystone: Keystone::new(http.clone(), &c.auth_url),
+            client,
             http,
             cfg: c.clone(),
         }));

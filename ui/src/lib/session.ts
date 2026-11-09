@@ -9,8 +9,13 @@ export interface ProjectRef extends IdName {
   domain?: IdName | null;
 }
 
+/** Kind of cloud (`[[cloud]] platform` in rassvet.toml): picks the sign-in form and the pages. */
+export type Platform = "openstack" | "vcenter" | "esxi" | "vcf";
+
 export interface SessionInfo {
   cloud: IdName;
+  /** Platform of `cloud`: OpenStack pages are only shown for "openstack". */
+  platform: Platform;
   user: ProjectRef;
   project: ProjectRef | null;
   roles: IdName[];
@@ -30,6 +35,7 @@ export interface SessionInfo {
 }
 
 export interface SignedInCloud extends IdName {
+  platform: Platform;
   user: ProjectRef;
   project: ProjectRef | null;
   expires_at: string;
@@ -58,6 +64,7 @@ export interface ExtensionManifest {
 export interface CloudInfo {
   id: string;
   name: string;
+  platform: Platform;
   default_domain: string;
 }
 
@@ -182,3 +189,20 @@ export const useSwitchProject = () =>
 
 export const useSwitchRegion = () =>
   useSessionMutation((region: string) => api.post<SessionInfo>("/session/region", { region }));
+
+/** Overview of a vCenter, ESXi or VCF cloud (`GET /api/platform/summary`). */
+export interface PlatformSummary {
+  platform: Platform;
+  product: { name: string; version?: string | null; build?: string | null } | null;
+  stats: { id: string; label: string; value: number; detail?: string }[];
+  warnings: string[];
+  notes: string[];
+}
+
+export function usePlatformSummary(session: SessionInfo) {
+  return useQuery({
+    queryKey: ["platform-summary", session.cloud.id],
+    queryFn: () => api.get<PlatformSummary>("/platform/summary"),
+    enabled: session.platform !== "openstack",
+  });
+}

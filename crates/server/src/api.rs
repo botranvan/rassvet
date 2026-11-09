@@ -1,5 +1,9 @@
 //! Core JSON API: clouds, login/logout, session, cloud/project/region switching, navigation.
 //!
+//! Clouds are OpenStack (Keystone), VMware vCenter / ESXi or VMware Cloud Foundation
+//! (`[[cloud]] platform`): sign-in goes to the cloud's platform; the platform-specific parts
+//! of other platforms live in `platform/`.
+//!
 //! A session can be signed in to several clouds at once (`POST /session/clouds` adds one);
 //! each request names its cloud, so switching clouds needs no new sign-in.
 
@@ -23,8 +27,9 @@ use rassvet_os_client::{AuthMethod, IdName, ProjectRef, Scope};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    config::Platform,
     nav,
-    session::{COOKIE, CloudLogin, Session},
+    session::{COOKIE, CloudLogin, OsLogin, Session},
     state::AppState,
 };
 
@@ -50,6 +55,7 @@ pub fn router() -> Router<AppState> {
         .route("/session/region", post(switch_region))
         .route("/session/prefs/{key}", put(put_pref))
         .route("/nav", get(nav_items))
+        .nest("/platform", crate::platform::router())
         .nest("/identity", crate::identity::router())
         .nest("/image", crate::image::router())
         .nest("/key-manager", crate::barbican::router())
@@ -117,14 +123,34 @@ async fn session_layer_inner(
         if let Some(login) = s.logins.get(&cloud_id)
             && let Some(cloud) = st.by_id.get(&cloud_id)
         {
-            req.extensions_mut().insert(RequestContext {
-                cloud_id: cloud.cfg.id.clone(),
-                auth_url: cloud.cfg.auth_url.clone(),
-                http: cloud.http.clone(),
-                token: login.token.clone(),
-                region: login.region.clone(),
-                interface: cloud.cfg.interface,
-            });
+            match login.openstack() {
+                Some(l) => {
+                    req.extensions_mut().insert(RequestContext {
+                        cloud_id: cloud.cfg.id.clone(),
+                        auth_url: cloud.cfg.auth_url.clone(),
+                        http: cloud.http.clone(),
+                        token: l.token.clone(),
+                        region: l.region.clone(),
+                        interface: cloud.cfg.interface,
+                    });
+                }
+                // vCenter, ESXi, VCF: no OpenStack API behind them. A clear answer instead of
+                // the 401 a missing context would give (the UI reads 401 as "signed out").
+                None if !crate::platform::allowed_path(req.uri().path()) => {
+                    return ApiError::new(
+                        StatusCode::CONFLICT,
+                        format!(
+                            "{} is a {} cloud: this OpenStack API is not available on it",
+                            cloud.cfg.name,
+                            cloud.cfg.platform.label()
+                        ),
+                    )
+                    .into_response();
+                }
+                None => {}
+            }
+            req.extensions_mut()
+                .insert(CloudPlatform(cloud.cfg.platform));
         }
         req.extensions_mut().insert(SessionId(sid));
         req.extensions_mut().insert(SelectedCloud(cloud_id));
@@ -172,6 +198,10 @@ fn requested_cloud(req: &mut Request) -> Option<String> {
 #[derive(Clone)]
 pub struct SessionId(pub String);
 
+/// Platform of the request's cloud, when the session is signed in to it.
+#[derive(Clone, Copy)]
+pub struct CloudPlatform(pub Platform);
+
 /// The cloud the request is for (see [`requested_cloud`]), whether or not the session is
 /// signed in to it.
 #[derive(Clone)]
@@ -195,6 +225,8 @@ pub const VERSION: &str = match option_env!("RASSVET_VERSION") {
 struct CloudInfo<'a> {
     id: &'a str,
     name: &'a str,
+    /// Picks the sign-in form: openstack | vcenter | esxi | vcf.
+    platform: Platform,
     default_domain: &'a str,
 }
 
@@ -205,6 +237,7 @@ async fn clouds(State(st): State<AppState>) -> Json<serde_json::Value> {
         .map(|c| CloudInfo {
             id: &c.cfg.id,
             name: &c.cfg.name,
+            platform: c.cfg.platform,
             default_domain: &c.cfg.default_domain,
         })
         .collect();
@@ -235,6 +268,8 @@ enum LoginRequest {
 #[derive(Serialize)]
 pub struct SessionInfo {
     cloud: IdName,
+    /// Platform of `cloud`: the UI shows OpenStack pages only for `openstack`.
+    platform: Platform,
     user: ProjectRef,
     project: Option<ProjectRef>,
     roles: Vec<IdName>,
@@ -256,6 +291,7 @@ pub struct SessionInfo {
 struct SignedInCloud {
     id: String,
     name: String,
+    platform: Platform,
     user: ProjectRef,
     project: Option<ProjectRef>,
     expires_at: chrono::DateTime<Utc>,
@@ -267,14 +303,67 @@ fn cloud_name(st: &AppState, id: &str) -> String {
         .map_or_else(|| id.to_owned(), |c| c.cfg.name.clone())
 }
 
+fn cloud_platform(st: &AppState, id: &str) -> Platform {
+    st.by_id
+        .get(id)
+        .map_or(Platform::Openstack, |c| c.cfg.platform)
+}
+
+/// The signed-in user of a login (other platforms have no user id: the name is used).
+fn login_user(l: &CloudLogin) -> ProjectRef {
+    match l.openstack() {
+        Some(o) => o.token.user.clone(),
+        None => ProjectRef {
+            id: l.user_name().to_owned(),
+            name: l.user_name().to_owned(),
+            domain: None,
+        },
+    }
+}
+
 /// The session as seen from `cloud_id`, which must be one of its clouds.
 fn info(st: &AppState, s: &Session, cloud_id: &str) -> SessionInfo {
-    let l = &s.logins[cloud_id];
+    let login = &s.logins[cloud_id];
+    let clouds = s
+        .logins
+        .iter()
+        .map(|(id, l)| SignedInCloud {
+            id: id.clone(),
+            name: cloud_name(st, id),
+            platform: cloud_platform(st, id),
+            user: login_user(l),
+            project: l.openstack().and_then(|o| o.token.project.clone()),
+            expires_at: l.expires_at(),
+        })
+        .collect();
+    let cloud = IdName {
+        id: cloud_id.to_owned(),
+        name: cloud_name(st, cloud_id),
+    };
+    let platform = cloud_platform(st, cloud_id);
+    let Some(l) = login.openstack() else {
+        // vCenter / ESXi / VCF: no projects, regions or catalog.
+        return SessionInfo {
+            cloud,
+            platform,
+            user: login_user(login),
+            project: None,
+            roles: vec![],
+            is_admin: false,
+            expires_at: login.expires_at(),
+            region: None,
+            regions: vec![],
+            projects: vec![],
+            services: vec![],
+            can_switch_project: false,
+            clouds,
+            prefs: s.prefs.clone(),
+            version: VERSION,
+        };
+    };
     SessionInfo {
-        cloud: IdName {
-            id: cloud_id.to_owned(),
-            name: cloud_name(st, cloud_id),
-        },
+        cloud,
+        platform,
         user: l.token.user.clone(),
         project: l.token.project.clone(),
         roles: l.token.roles.clone(),
@@ -285,17 +374,7 @@ fn info(st: &AppState, s: &Session, cloud_id: &str) -> SessionInfo {
         projects: l.projects.clone(),
         services: l.token.catalog.service_types(l.region.as_deref()),
         can_switch_project: l.unscoped.is_some(),
-        clouds: s
-            .logins
-            .iter()
-            .map(|(id, l)| SignedInCloud {
-                id: id.clone(),
-                name: cloud_name(st, id),
-                user: l.token.user.clone(),
-                project: l.token.project.clone(),
-                expires_at: l.token.expires_at,
-            })
-            .collect(),
+        clouds,
         prefs: s.prefs.clone(),
         version: VERSION,
     }
@@ -321,13 +400,20 @@ fn pick_region(
     }
 }
 
-/// Best effort: revoke a cloud's tokens so they can't be reused.
+/// Best effort: revoke a cloud's tokens (or end its vSphere / SDDC Manager session) so they
+/// can't be reused.
 async fn revoke(st: &AppState, cloud_id: &str, l: &CloudLogin) {
-    if let Some(c) = st.by_id.get(cloud_id) {
-        let _ = c.keystone.revoke(&l.token.value).await;
-        if let Some(u) = &l.unscoped {
-            let _ = c.keystone.revoke(u).await;
+    let Some(c) = st.by_id.get(cloud_id) else {
+        return;
+    };
+    match (c.keystone(), l.openstack()) {
+        (Some(ks), Some(l)) => {
+            let _ = ks.revoke(&l.token.value).await;
+            if let Some(u) = &l.unscoped {
+                let _ = ks.revoke(u).await;
+            }
         }
+        _ => crate::platform::revoke(c, l).await,
     }
 }
 
@@ -424,7 +510,7 @@ async fn sign_in(st: &AppState, req: LoginRequest) -> Result<(String, CloudLogin
     match authenticate(st, req).await {
         Ok(ok) => {
             st.login_throttle.success(&key);
-            tracing::info!(cloud = %ok.0, user = %ok.1.token.user.name, "login");
+            tracing::info!(cloud = %ok.0, user = %ok.1.user_name(), "login");
             Ok(ok)
         }
         Err(e) => {
@@ -503,7 +589,23 @@ async fn authenticate(st: &AppState, req: LoginRequest) -> Result<(String, Cloud
         .get(cloud_id)
         .cloned()
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "unknown cloud"))?;
-    let ks = &cloud.keystone;
+    let Some(ks) = cloud.keystone() else {
+        // vCenter, ESXi, VCF: user name and password, nothing else.
+        return match req {
+            LoginRequest::Password {
+                username, password, ..
+            } => crate::platform::authenticate(&cloud, &username, &password)
+                .await
+                .map(|l| (cloud.cfg.id.clone(), l)),
+            LoginRequest::ApplicationCredential { .. } => Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "application credentials are OpenStack's; sign in to this {} cloud with a user name and password",
+                    cloud.cfg.platform.label()
+                ),
+            )),
+        };
+    };
 
     let (unscoped, token, projects) = match req {
         LoginRequest::Password {
@@ -570,12 +672,12 @@ async fn authenticate(st: &AppState, req: LoginRequest) -> Result<(String, Cloud
 
     Ok((
         cloud.cfg.id.clone(),
-        CloudLogin {
+        CloudLogin::Openstack(OsLogin {
             unscoped,
             region: pick_region(cloud.cfg.default_region.as_deref(), &token.catalog),
             token: Arc::new(token),
             projects,
-        },
+        }),
     ))
 }
 
@@ -726,6 +828,7 @@ async fn switch_project(
     let l = s
         .logins
         .get(&cloud_id)
+        .and_then(CloudLogin::openstack)
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "not logged in"))?;
     let unscoped = l.unscoped.clone().ok_or_else(|| {
         ApiError::new(
@@ -740,8 +843,10 @@ async fn switch_project(
         ));
     }
     let cloud = &st.by_id[&cloud_id];
-    let token = cloud
-        .keystone
+    let ks = cloud
+        .keystone()
+        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "not an OpenStack cloud"))?;
+    let token = ks
         .authenticate(
             &AuthMethod::Token(unscoped),
             &Scope::ProjectId(req.project_id),
@@ -752,7 +857,11 @@ async fn switch_project(
     let s = st
         .sessions
         .update(&id, |s| {
-            if let Some(l) = s.logins.get_mut(&cloud_id) {
+            if let Some(l) = s
+                .logins
+                .get_mut(&cloud_id)
+                .and_then(CloudLogin::openstack_mut)
+            {
                 if !l.region.as_ref().is_some_and(|r| regions.contains(r)) {
                     l.region = pick_region(cloud.cfg.default_region.as_deref(), &token.catalog);
                 }
@@ -762,7 +871,7 @@ async fn switch_project(
         .await
         .filter(|s| s.logins.contains_key(&cloud_id))
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "session expired"))?;
-    let _ = cloud.keystone.revoke(&old).await;
+    let _ = ks.revoke(&old).await;
     Ok(Json(info(&st, &s, &cloud_id)))
 }
 
@@ -786,6 +895,7 @@ async fn switch_region(
     let l = s
         .logins
         .get(&cloud_id)
+        .and_then(CloudLogin::openstack)
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "not logged in"))?;
     if !l.token.catalog.regions().contains(&req.region) {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "unknown region"));
@@ -793,7 +903,11 @@ async fn switch_region(
     let s = st
         .sessions
         .update(&id, |s| {
-            if let Some(l) = s.logins.get_mut(&cloud_id) {
+            if let Some(l) = s
+                .logins
+                .get_mut(&cloud_id)
+                .and_then(CloudLogin::openstack_mut)
+            {
                 l.region = Some(req.region);
             }
         })
@@ -903,8 +1017,21 @@ struct NavResponse {
 
 async fn nav_items(
     State(st): State<AppState>,
-    ctx: RequestContext,
+    ctx: Option<axum::Extension<RequestContext>>,
+    platform: Option<axum::Extension<CloudPlatform>>,
 ) -> Result<Json<NavResponse>, ApiError> {
+    let Some(axum::Extension(ctx)) = ctx else {
+        // vCenter / ESXi / VCF: only the overview for now (always in the menu).
+        return match platform {
+            Some(axum::Extension(CloudPlatform(p))) if p != Platform::Openstack => {
+                Ok(Json(NavResponse {
+                    items: vec![],
+                    extensions: vec![],
+                }))
+            }
+            _ => Err(ApiError::new(StatusCode::UNAUTHORIZED, "not logged in")),
+        };
+    };
     let catalog = &ctx.token.catalog;
     let region = ctx.region.as_deref();
     let allowed = |role: &Option<String>| role.as_deref().is_none_or(|r| ctx.token.has_role(r));
@@ -1054,6 +1181,7 @@ mod tests {
         let Ok((_, cl)) = sign_in(&st, login(Some("123 456"))).await else {
             panic!("password + code should sign in");
         };
+        let cl = cl.openstack().unwrap();
         assert_eq!(cl.token.value, "tok");
         assert_eq!(cl.token.methods, ["password", "totp"]);
     }
@@ -1073,6 +1201,52 @@ mod tests {
         }
         let (status, _) = error_of(refused(sign_in(&st, login(Some("123456"))).await)).await;
         assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn vcenter_clouds_sign_in_with_their_own_client() {
+        let vc = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/session"))
+            .respond_with(ResponseTemplate::new(201).set_body_json("vc-sess"))
+            .mount(&vc)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/session"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"user": "VSPHERE.LOCAL\\alice"})),
+            )
+            .mount(&vc)
+            .await;
+        let cfg: crate::config::Config = toml::from_str(&format!(
+            "[[cloud]]\nid = \"vc\"\nname = \"DC1\"\nplatform = \"vcenter\"\nurl = \"{}\"\n",
+            vc.uri()
+        ))
+        .unwrap();
+        let st = crate::state::build(cfg, vec![]).unwrap();
+        let req = |method: &str| -> LoginRequest {
+            serde_json::from_value(serde_json::json!({
+                "method": method, "cloud": "vc", "username": "alice@vsphere.local",
+                "password": "pw", "id": "x", "secret": "y",
+            }))
+            .unwrap()
+        };
+        let Ok((id, l)) = sign_in(&st, req("password")).await else {
+            panic!("vCenter sign-in should work");
+        };
+        assert_eq!(id, "vc");
+        assert!(matches!(l, CloudLogin::Vsphere(_)));
+        let s = Session::new(id.clone(), l);
+        let i = info(&st, &s, &id);
+        assert_eq!(i.platform, Platform::Vcenter);
+        assert_eq!(i.user.name, "VSPHERE.LOCAL\\alice");
+        assert!(i.services.is_empty() && i.projects.is_empty());
+
+        // OpenStack's application credentials don't apply.
+        let (status, _) =
+            error_of(refused(sign_in(&st, req("application_credential")).await)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[test]

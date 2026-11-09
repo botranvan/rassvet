@@ -1,5 +1,6 @@
 //! Server-side sessions. The browser only holds an opaque random id in an HttpOnly
-//! cookie; Keystone tokens never leave the server.
+//! cookie; Keystone tokens (and vCenter / ESXi sessions, SDDC Manager tokens) never leave
+//! the server.
 //!
 //! Sessions always live in this process's memory. When `[memcached]` is configured they
 //! are also stored there (optionally encrypted), so they survive restarts and are shared
@@ -35,14 +36,81 @@ pub const COOKIE: &str = "rassvet_sid";
 /// this, or a quarter of the idle timeout when that is shorter (so short timeouts still work).
 const TOUCH_EVERY_SECS: i64 = 60;
 
-/// One cloud signed in to within a session.
+/// One cloud signed in to within a session, by platform.
 #[derive(Clone)]
-pub struct CloudLogin {
+pub enum CloudLogin {
+    Openstack(OsLogin),
+    /// vCenter or standalone ESXi.
+    Vsphere(VsphereLogin),
+    Vcf(VcfLogin),
+}
+
+/// An OpenStack cloud: Keystone tokens.
+#[derive(Clone)]
+pub struct OsLogin {
     /// Unscoped token kept for project switching (password logins only).
     pub unscoped: Option<String>,
     pub token: Arc<Token>,
     pub projects: Vec<ProjectRef>,
     pub region: Option<String>,
+}
+
+/// A vCenter / ESXi session. Those end after some idle time on the endpoint's side (30
+/// minutes by default); a request that finds it gone signs this cloud out.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VsphereLogin {
+    pub session: rassvet_vsphere_client::Session,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// SDDC Manager tokens: the access token is refreshed with the refresh token until
+/// `expires_at` (the refresh token's lifetime).
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcfLogin {
+    pub user: String,
+    pub tokens: rassvet_vcf_client::Tokens,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl CloudLogin {
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        match self {
+            CloudLogin::Openstack(l) => l.token.expires_at,
+            CloudLogin::Vsphere(l) => l.expires_at,
+            CloudLogin::Vcf(l) => l.expires_at,
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        match self {
+            CloudLogin::Openstack(l) => l.token.is_expired(),
+            _ => self.expires_at() <= Utc::now(),
+        }
+    }
+
+    /// The Keystone side of an OpenStack login.
+    pub fn openstack(&self) -> Option<&OsLogin> {
+        match self {
+            CloudLogin::Openstack(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn openstack_mut(&mut self) -> Option<&mut OsLogin> {
+        match self {
+            CloudLogin::Openstack(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// Who is signed in, as the cloud spells it.
+    pub fn user_name(&self) -> &str {
+        match self {
+            CloudLogin::Openstack(l) => &l.token.user.name,
+            CloudLogin::Vsphere(l) => &l.session.user,
+            CloudLogin::Vcf(l) => &l.user,
+        }
+    }
 }
 
 /// A browser's login: one or more clouds, each with its own Keystone tokens. Requests name
@@ -87,7 +155,7 @@ impl Session {
         let expired: Vec<String> = self
             .logins
             .iter()
-            .filter(|(_, l)| l.token.is_expired())
+            .filter(|(_, l)| l.is_expired())
             .map(|(id, _)| id.clone())
             .collect();
         for id in &expired {
@@ -145,7 +213,7 @@ impl SessionStore {
     fn seconds_left(&self, s: &Session) -> i64 {
         let now = Utc::now();
         let mut left = (s.last_seen + self.limits.idle - now).num_seconds();
-        let last_token = s.logins.values().map(|l| l.token.expires_at).max();
+        let last_token = s.logins.values().map(|l| l.expires_at()).max();
         left = left.min(last_token.map_or(0, |t| (t - now).num_seconds()));
         if let Some(max) = self.limits.max {
             left = left.min((s.created_at + max - now).num_seconds());
@@ -282,7 +350,7 @@ impl SessionStore {
     }
 
     fn is_dead(&self, s: &Session) -> bool {
-        s.logins.values().all(|l| l.token.is_expired()) || self.seconds_left(s) <= 0
+        s.logins.values().all(|l| l.is_expired()) || self.seconds_left(s) <= 0
     }
 
     fn touch_every(&self) -> i64 {
@@ -334,8 +402,24 @@ struct Stored {
     prefs: BTreeMap<String, serde_json::Value>,
 }
 
+/// One cloud of a stored session. OpenStack logins are stored as before (no `platform`
+/// field), so sessions written by older versions read the same and vice versa.
 #[derive(Serialize, Deserialize)]
-struct StoredLogin {
+#[serde(untagged)]
+enum StoredLogin {
+    Platform(StoredPlatformLogin),
+    Openstack(StoredOsLogin),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "platform", rename_all = "lowercase")]
+enum StoredPlatformLogin {
+    Vsphere(VsphereLogin),
+    Vcf(VcfLogin),
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredOsLogin {
     unscoped: Option<String>,
     token: StoredToken,
     projects: Vec<ProjectRef>,
@@ -360,12 +444,12 @@ struct StoredV1 {
 
 impl From<StoredV1> for Stored {
     fn from(v: StoredV1) -> Self {
-        let login = StoredLogin {
+        let login = StoredLogin::Openstack(StoredOsLogin {
             unscoped: v.unscoped,
             token: v.token,
             projects: v.projects,
             region: v.region,
-        };
+        });
         Self {
             logins: BTreeMap::from([(v.cloud_id.clone(), login)]),
             active: v.cloud_id,
@@ -394,6 +478,28 @@ impl From<&Session> for Stored {
 
 impl From<&CloudLogin> for StoredLogin {
     fn from(l: &CloudLogin) -> Self {
+        match l {
+            CloudLogin::Openstack(l) => StoredLogin::Openstack(l.into()),
+            CloudLogin::Vsphere(l) => {
+                StoredLogin::Platform(StoredPlatformLogin::Vsphere(l.clone()))
+            }
+            CloudLogin::Vcf(l) => StoredLogin::Platform(StoredPlatformLogin::Vcf(l.clone())),
+        }
+    }
+}
+
+impl From<StoredLogin> for CloudLogin {
+    fn from(l: StoredLogin) -> Self {
+        match l {
+            StoredLogin::Openstack(l) => CloudLogin::Openstack(l.into()),
+            StoredLogin::Platform(StoredPlatformLogin::Vsphere(l)) => CloudLogin::Vsphere(l),
+            StoredLogin::Platform(StoredPlatformLogin::Vcf(l)) => CloudLogin::Vcf(l),
+        }
+    }
+}
+
+impl From<&OsLogin> for StoredOsLogin {
+    fn from(l: &OsLogin) -> Self {
         let t = &l.token;
         Self {
             unscoped: l.unscoped.clone(),
@@ -414,8 +520,8 @@ impl From<&CloudLogin> for StoredLogin {
     }
 }
 
-impl From<StoredLogin> for CloudLogin {
-    fn from(l: StoredLogin) -> Self {
+impl From<StoredOsLogin> for OsLogin {
+    fn from(l: StoredOsLogin) -> Self {
         let t = l.token;
         Self {
             unscoped: l.unscoped,
@@ -579,7 +685,7 @@ mod tests {
     use super::*;
 
     fn login(token: &str, expires_in: chrono::Duration) -> CloudLogin {
-        CloudLogin {
+        CloudLogin::Openstack(OsLogin {
             unscoped: Some("unscoped-token".into()),
             token: Arc::new(Token {
                 value: token.into(),
@@ -601,7 +707,7 @@ mod tests {
             }),
             projects: vec![],
             region: Some("RegionOne".into()),
-        }
+        })
     }
 
     fn session() -> Session {
@@ -680,13 +786,57 @@ mod tests {
                 assert!(!raw.windows(12).any(|w| w == b"gAAAA-secret"));
             }
             let s = r.decode(&key, &raw).unwrap();
-            let l = &s.logins["lab"];
+            let l = s.logins["lab"].openstack().unwrap();
             assert_eq!(s.active, "lab");
             assert_eq!(l.token.value, "gAAAA-secret");
             assert_eq!(l.unscoped.as_deref(), Some("unscoped-token"));
             assert_eq!(l.region.as_deref(), Some("RegionOne"));
             assert_eq!(s.prefs["table.x"]["q"], "web");
         }
+    }
+
+    #[test]
+    fn round_trips_vmware_logins() {
+        let r = remote(Some("0123456789abcdef0123"));
+        let key = r.key("abc");
+        let mut s = session();
+        s.logins.insert(
+            "vc".into(),
+            CloudLogin::Vsphere(VsphereLogin {
+                session: rassvet_vsphere_client::Session {
+                    product: rassvet_vsphere_client::Product::Vcenter,
+                    id: "vc-session-secret".into(),
+                    user: "VSPHERE.LOCAL\\Administrator".into(),
+                    about: Default::default(),
+                    session_manager: None,
+                },
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+            }),
+        );
+        s.logins.insert(
+            "vcf".into(),
+            CloudLogin::Vcf(VcfLogin {
+                user: "administrator@vsphere.local".into(),
+                tokens: rassvet_vcf_client::Tokens {
+                    access_token: "access".into(),
+                    refresh_token: "refresh".into(),
+                    access_expires_at: Utc::now(),
+                },
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+            }),
+        );
+        let raw = r.encode(&key, &s).unwrap();
+        assert!(!raw.windows(17).any(|w| w == b"vc-session-secret"));
+        let back = r.decode(&key, &raw).unwrap();
+        assert!(back.logins["lab"].openstack().is_some());
+        let CloudLogin::Vsphere(vc) = &back.logins["vc"] else {
+            panic!("vCenter login lost its platform")
+        };
+        assert_eq!(vc.session.id, "vc-session-secret");
+        assert_eq!(
+            back.logins["vcf"].user_name(),
+            "administrator@vsphere.local"
+        );
     }
 
     #[test]
@@ -700,7 +850,10 @@ mod tests {
         let raw = [&[PLAIN][..], &serde_json::to_vec(&v1).unwrap()].concat();
         let s = r.decode(&key, &raw).unwrap();
         assert_eq!(s.active, "lab");
-        assert_eq!(s.logins["lab"].token.value, "gAAAA-secret");
+        assert_eq!(
+            s.logins["lab"].openstack().unwrap().token.value,
+            "gAAAA-secret"
+        );
     }
 
     #[tokio::test]

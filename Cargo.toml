@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/os-client",
+    "crates/clients/openstack",
+    "crates/clients/vsphere",
+    "crates/clients/vcf",
     "crates/ext-api",
     "crates/server",
     "extensions/octavia",
@@ -17,7 +19,9 @@ license = "Apache-2.0"
 rust-version = "1.88"
 
 [workspace.dependencies]
-rassvet-os-client = { path = "crates/os-client" }
+rassvet-os-client = { path = "crates/clients/openstack" }
+rassvet-vsphere-client = { path = "crates/clients/vsphere" }
+rassvet-vcf-client = { path = "crates/clients/vcf" }
 rassvet-ext-api = { path = "crates/ext-api" }
 rassvet-ext-octavia = { path = "extensions/octavia" }
 rassvet-ext-magnum = { path = "extensions/magnum" }
