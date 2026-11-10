@@ -75,7 +75,38 @@ export function Field({
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...rest }, ref) {
+    if (rest.type === "number" && rest.value !== undefined) return <NumberInput ref={ref} className={className} {...rest} />;
     return <input ref={ref} className={cn(fieldBase, className)} {...rest} />;
+  },
+);
+
+/**
+ * A number field shows what is typed while it has the focus, not the number its owner made of
+ * it: a form that keeps a number turns an emptied field back into 0 (or its minimum) at once,
+ * so the old digits could never be deleted to type new ones. The owner's number comes back
+ * when the field loses the focus.
+ */
+const NumberInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function NumberInput({ className, value, onChange, onBlur, ...rest }, ref) {
+    const [draft, setDraft] = useState<string | null>(null);
+    return (
+      <input
+        ref={ref}
+        className={cn(fieldBase, className)}
+        {...rest}
+        value={draft ?? value}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onChange?.(e);
+        }}
+        onBlur={(e) => {
+          setDraft(null);
+          // React leaves "03" in a field whose value is 3: write the number as it is kept.
+          if (typeof value === "number") e.currentTarget.value = String(value);
+          onBlur?.(e);
+        }}
+      />
+    );
   },
 );
 
