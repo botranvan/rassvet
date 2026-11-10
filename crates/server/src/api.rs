@@ -643,8 +643,14 @@ async fn authenticate(st: &AppState, req: LoginRequest) -> Result<(String, Cloud
                 Err(e) => return Err(e.into()),
             };
             let projects = ks.list_auth_projects(&unscoped.value).await?;
+            // No scope asked: Keystone scopes the token to the user's default project when
+            // there is one the user can still use. That project is where the session starts;
+            // without one, the first of the list.
+            let default_project = unscoped.project.as_ref().map(|p| p.id.clone());
+            let usable = |id: &String| projects.iter().any(|p| &p.id == id);
             let target = project_id
-                .filter(|id| projects.iter().any(|p| &p.id == id))
+                .filter(usable)
+                .or_else(|| default_project.filter(usable))
                 .or_else(|| projects.first().map(|p| p.id.clone()));
             let token = match target {
                 Some(pid) => {
@@ -1184,6 +1190,91 @@ mod tests {
         let cl = cl.openstack().unwrap();
         assert_eq!(cl.token.value, "tok");
         assert_eq!(cl.token.methods, ["password", "totp"]);
+    }
+
+    /// A Keystone where alice can use projects `alpha` and `infra`; `default` is the project
+    /// Keystone scopes her password token to (her default project), if any.
+    async fn projects_keystone(default: Option<&str>) -> MockServer {
+        let ks = MockServer::start().await;
+        let token = |project: Option<&str>| {
+            let mut t = serde_json::json!({
+                "expires_at": "2099-01-01T00:00:00.000000Z",
+                "methods": ["password"],
+                "user": {"id": "u1", "name": "alice"},
+                "roles": [],
+            });
+            if let Some(p) = project {
+                t["project"] = serde_json::json!({"id": p, "name": p});
+            }
+            serde_json::json!({ "token": t })
+        };
+        for p in ["alpha", "infra"] {
+            Mock::given(method("POST"))
+                .and(path("/v3/auth/tokens"))
+                .and(body_partial_json(
+                    serde_json::json!({"auth": {"scope": {"project": {"id": p}}}}),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(201)
+                        .insert_header("X-Subject-Token", format!("tok-{p}"))
+                        .set_body_json(token(Some(p))),
+                )
+                .with_priority(1)
+                .mount(&ks)
+                .await;
+        }
+        Mock::given(method("POST"))
+            .and(path("/v3/auth/tokens"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .insert_header("X-Subject-Token", "tok-password")
+                    .set_body_json(token(default)),
+            )
+            .with_priority(5)
+            .mount(&ks)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v3/auth/projects"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"projects": [
+                    {"id": "alpha", "name": "alpha"},
+                    {"id": "infra", "name": "infra"},
+                ]}),
+            ))
+            .mount(&ks)
+            .await;
+        ks
+    }
+
+    async fn signed_in_project(ks: &MockServer, project_id: Option<&str>) -> String {
+        let req: LoginRequest = serde_json::from_value(serde_json::json!({
+            "method": "password", "cloud": "lab", "username": "alice", "password": "secret",
+            "project_id": project_id,
+        }))
+        .unwrap();
+        let Ok((_, cl)) = sign_in(&state_for(ks), req).await else {
+            panic!("sign-in should succeed");
+        };
+        let cl = cl.openstack().unwrap();
+        assert_eq!(cl.unscoped.as_deref(), Some("tok-password"));
+        cl.token.project.as_ref().unwrap().id.clone()
+    }
+
+    #[tokio::test]
+    async fn sign_in_starts_in_the_default_project() {
+        // The default project wins over the first of the list.
+        let ks = projects_keystone(Some("infra")).await;
+        assert_eq!(signed_in_project(&ks, None).await, "infra");
+        // A project asked for at sign-in wins over the default.
+        assert_eq!(signed_in_project(&ks, Some("alpha")).await, "alpha");
+
+        // No default project: the first of the list.
+        let ks = projects_keystone(None).await;
+        assert_eq!(signed_in_project(&ks, None).await, "alpha");
+
+        // A default project that is not in the list (disabled, say): the first of the list.
+        let ks = projects_keystone(Some("gone")).await;
+        assert_eq!(signed_in_project(&ks, None).await, "alpha");
     }
 
     #[tokio::test]
