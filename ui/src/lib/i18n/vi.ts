@@ -4845,6 +4845,12 @@ const vi: Record<string, string> = {
   "Workload domains": "Workload domain",
   "vCenter Servers": "vCenter Server",
   "NSX Managers": "NSX Manager",
+  "Graph tooltip": "Tooltip biểu đồ",
+  "Shared crosshair": "Crosshair dùng chung",
+  "Shared tooltip": "Tooltip dùng chung",
+  "Each graph on its own": "Mỗi biểu đồ riêng",
+  "The hovered time on every graph": "Thời điểm đang trỏ trên mọi biểu đồ",
+  "The hovered time and values on every graph": "Thời điểm và giá trị đang trỏ trên mọi biểu đồ",
 };
 
 export default vi;

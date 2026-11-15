@@ -26,7 +26,19 @@ flavor or a disk). Their choices apply to every panel of the page and are kept i
 Point at a chart to see every series' value at that time. Under each chart, a table gives the **last**,
 **average** and **maximum** value of each series in the range. Long legends show a few rows and scroll.
 Tick one or more series in a legend to draw only those (the scale adjusts to them), and click **Show all**
-to see every series again. Panels can also show single values (as
+to see every series again.
+
+**Graph tooltip**, next to the time range, works like Grafana's setting of the same name:
+
+| Choice | Pointing at a time series chart shows |
+|--------|---------------------------------------|
+| **Default** | The time and values on that chart only |
+| **Shared crosshair** | A line at the same time on every chart of the page; the values on the chart you point at |
+| **Shared tooltip** | The line and the values at that time on every chart of the page, to compare panels at a glance |
+
+Your choice is kept in the page's address; the dashboard may start with another one than **Default**.
+
+Panels can also show single values (as
 numbers or gauges) and pie charts; those show the value at the end of the time range.
 
 | Chart | What it shows |

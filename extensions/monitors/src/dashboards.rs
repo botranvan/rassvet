@@ -10,6 +10,7 @@
 //!     - monitor: cloud-infras
 //!     - db: public-infras
 //!   discover: '{monitor="$monitor",project_id=~"$project_id",guest_id!=""}'  # optional
+//!   graph_tooltip: shared_tooltip  # optional: default | shared_crosshair | shared_tooltip
 //!   panels:
 //!     - name: cpu
 //!       description: CPU usage
@@ -114,8 +115,24 @@ struct EntryDef {
     variables: Option<VarsDef>,
     /// Default `legend_rows` of the dashboard's panels.
     legend_rows: Option<u32>,
+    /// How hovering one time series chart shows on the others (default: only on itself).
+    graph_tooltip: Option<GraphTooltip>,
     #[serde(default)]
     panels: Vec<PanelDef>,
+}
+
+/// Grafana's "Graph tooltip" setting: what hovering a time series chart shows on the other
+/// time series charts of the page. Users can change it on the page.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphTooltip {
+    /// Each chart shows its own crosshair and tooltip only.
+    #[default]
+    Default,
+    /// The crosshair is drawn on every chart at the same time; the tooltip on the hovered one.
+    SharedCrosshair,
+    /// Crosshair and tooltip on every chart at the same time.
+    SharedTooltip,
 }
 
 /// `variables:` as a list of one-key maps (`- monitor: cloud-infras`) or as one map, in order.
@@ -181,6 +198,8 @@ pub struct Dashboard {
     /// Whether the page shows Rassvet's instance / server picker (from `discover`). A physical
     /// dashboard that defines `compute_node_id` or `hostname` as variables uses those instead.
     pub server_picker: bool,
+    /// Initial "Graph tooltip" mode of the page (`graph_tooltip:`).
+    pub graph_tooltip: GraphTooltip,
     /// Series selector listing the instances / servers to pick from.
     #[serde(skip)]
     pub discover: String,
@@ -592,6 +611,9 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
             if e.legend_rows.is_some() {
                 d.legend_rows = e.legend_rows;
             }
+            if let Some(g) = e.graph_tooltip {
+                d.graph_tooltip = g;
+            }
             i
         }
         None => {
@@ -601,6 +623,7 @@ fn add(cat: &mut Catalog, src: &str, e: EntryDef) -> anyhow::Result<()> {
                 kind,
                 variables: Vec::new(),
                 server_picker: true,
+                graph_tooltip: e.graph_tooltip.unwrap_or_default(),
                 legend_rows: e.legend_rows,
                 discover: e
                     .discover
@@ -1370,6 +1393,30 @@ mod tests {
         );
         assert!(one("- dashboard: physical-x\n  panels: [{name: a, max_series: 51, queries: [{query: x}]}]").unwrap_err().to_string().contains("max_series"));
         assert!(one("- dashboard: physical-x\n  legend_rows: 0\n  panels: [{name: a, queries: [{query: x}]}]").unwrap_err().to_string().contains("legend_rows"));
+    }
+
+    #[test]
+    fn graph_tooltip() {
+        let c = parse(&[
+            (
+                "a.yaml".into(),
+                "- dashboard: physical.*\n  panels: [{name: a, queries: [{query: x}]}]\n".into(),
+            ),
+            (
+                "b.yaml".into(),
+                "- dashboard: physical.*\n  graph_tooltip: shared_tooltip\n".into(),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(c.dashboards[0].graph_tooltip, GraphTooltip::SharedTooltip);
+        let d =
+            one("- dashboard: physical-x\n  panels: [{name: a, queries: [{query: x}]}]").unwrap();
+        assert_eq!(d.dashboards[0].graph_tooltip, GraphTooltip::Default);
+        assert_eq!(
+            serde_json::to_value(GraphTooltip::SharedCrosshair).unwrap(),
+            "shared_crosshair"
+        );
+        assert!(one("- dashboard: physical-x\n  graph_tooltip: shared\n  panels: [{name: a, queries: [{query: x}]}]").is_err());
     }
 
     #[test]
