@@ -5,7 +5,18 @@
  */
 import { ErrorNotice, Field, Mono, PageHeader, Picker, tr, useInAdmin, useSearchParams } from "@rassvet/sdk";
 import { type GuestItem, useDashboards, useInfo, useTargets } from "./api";
-import { DashboardPicker, PanelGrid, RangeBar, VariableBar, pickedVars, useDashboardVars, useNow } from "./Panels";
+import {
+  DashboardPicker,
+  GraphTooltipPicker,
+  PanelGrid,
+  RangeBar,
+  VariableBar,
+  graphTooltipOf,
+  pickedVars,
+  useDashboardVars,
+  useNow,
+} from "./Panels";
+import { GraphTooltipProvider } from "./hover";
 import { formatSpec, parseRange, resolve } from "./range";
 
 export default function Instances() {
@@ -62,6 +73,7 @@ function InstancesPage({ admin, maxDays, ownProject }: { admin: boolean; maxDays
   // Query variables may use the picked instance ($guest_id) and its project.
   const dv = useDashboardVars(dash, params, { project_id: projectId || undefined, guest_id: guestId || undefined }, range);
   const clearVars = Object.fromEntries(Object.keys(pickedVars(params)).map((k) => [`var-${k}`, null]));
+  const tooltip = graphTooltipOf(params, dash);
 
   return (
     <>
@@ -121,37 +133,43 @@ function InstancesPage({ admin, maxDays, ownProject }: { admin: boolean; maxDays
           )}
         </Field>
         <VariableBar resolved={dv.resolved} loading={dv.loading} onChange={(name, v) => set({ [`var-${name}`]: v })} />
+        <GraphTooltipPicker
+          value={tooltip}
+          onChange={(v) => set({ tooltip: v === (dash?.graph_tooltip ?? "default") ? null : v })}
+        />
         <RangeBar spec={spec} maxDays={maxDays} onChange={(s) => set({ range: formatSpec(s) })} onRefresh={refresh} />
       </div>
       {(dashboards.error || targets.error || dv.error) && (
         <ErrorNotice error={dashboards.error ?? targets.error ?? dv.error} className="mb-4" />
       )}
 
-      {!dash ? (
-        dashboards.data && <p className="text-sm text-muted">{tr("No instance dashboard is defined in the panel files.")}</p>
-      ) : !dv.vars ? (
-        !dv.error && <p className="text-sm text-muted">{tr("Loading…")}</p>
-      ) : guestId ? (
-        <>
-          <h2 className="mb-3 text-sm font-semibold">
-            {guest?.guest_name ?? guestId}
-            {guest && adminView && <span className="ml-2 font-normal text-muted">{guest.project_name}</span>}
-          </h2>
-          {projectId ? (
-            <PanelGrid dashboard={dash.id} panels={target} target={{ project_id: projectId, guest_id: guestId, vars: dv.vars }} range={range} />
-          ) : (
-            <p className="text-sm text-muted">{tr("This instance has no metrics in this time range.")}</p>
-          )}
-        </>
-      ) : projectId ? (
-        <>
-          <h2 className="mb-1 text-sm font-semibold">{tr("Project: {name}", { name: projectName || projectId })}</h2>
-          <p className="mb-3 text-xs text-muted">{tr("Choose an instance to see its own panels.")}</p>
-          <PanelGrid dashboard={dash.id} panels={overview} target={{ project_id: projectId, vars: dv.vars }} range={range} />
-        </>
-      ) : (
-        <p className="text-sm text-muted">{tr("Choose a project or an instance.")}</p>
-      )}
+      <GraphTooltipProvider mode={tooltip}>
+        {!dash ? (
+          dashboards.data && <p className="text-sm text-muted">{tr("No instance dashboard is defined in the panel files.")}</p>
+        ) : !dv.vars ? (
+          !dv.error && <p className="text-sm text-muted">{tr("Loading…")}</p>
+        ) : guestId ? (
+          <>
+            <h2 className="mb-3 text-sm font-semibold">
+              {guest?.guest_name ?? guestId}
+              {guest && adminView && <span className="ml-2 font-normal text-muted">{guest.project_name}</span>}
+            </h2>
+            {projectId ? (
+              <PanelGrid dashboard={dash.id} panels={target} target={{ project_id: projectId, guest_id: guestId, vars: dv.vars }} range={range} />
+            ) : (
+              <p className="text-sm text-muted">{tr("This instance has no metrics in this time range.")}</p>
+            )}
+          </>
+        ) : projectId ? (
+          <>
+            <h2 className="mb-1 text-sm font-semibold">{tr("Project: {name}", { name: projectName || projectId })}</h2>
+            <p className="mb-3 text-xs text-muted">{tr("Choose an instance to see its own panels.")}</p>
+            <PanelGrid dashboard={dash.id} panels={overview} target={{ project_id: projectId, vars: dv.vars }} range={range} />
+          </>
+        ) : (
+          <p className="text-sm text-muted">{tr("Choose a project or an instance.")}</p>
+        )}
+      </GraphTooltipProvider>
     </>
   );
 }

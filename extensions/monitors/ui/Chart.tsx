@@ -1,11 +1,13 @@
 /**
  * A time series line chart in SVG: value axis from zero, local-time axis, gaps where data is
  * missing, a crosshair with every series' value on hover, and a legend table (last / avg / max)
- * so values are readable as text and series aren't told apart by colour alone.
+ * so values are readable as text and series aren't told apart by colour alone. Inside a
+ * `GraphTooltipProvider`, the crosshair (and tooltip) can follow the hover of another chart.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { cn, lang, tr } from "@rassvet/sdk";
 import type { Range, Series, Unit } from "./api";
+import { useChartHover } from "./hover";
 import { fmt, fmtTick, niceTicks } from "./units";
 
 /** Categorical slots, light and dark steps (validated for colour-vision deficiency, in this order). */
@@ -127,7 +129,7 @@ export function Chart({
   useChartStyle();
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
-  const [hover, setHover] = useState<number | null>(null);
+  const { t: hover, tooltip, set: setHover } = useChartHover(useId());
   const pick = useLegendPick();
 
   useEffect(() => {
@@ -230,7 +232,7 @@ export function Chart({
             onPointerLeave={() => setHover(null)}
           />
         </svg>
-        {hoverT !== null && (
+        {hoverT !== null && tooltip && (
           <div
             className="pointer-events-none absolute top-1 z-10 max-h-[180px] min-w-40 overflow-hidden rounded-md border border-line bg-panel px-3 py-2 text-xs shadow-lg"
             style={x(hoverT) > width / 2 ? { right: width - x(hoverT) + 10 } : { left: x(hoverT) + 10 }}

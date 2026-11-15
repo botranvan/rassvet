@@ -113,6 +113,7 @@ merged into one page, so you can keep the defaults in one file and add panels in
 | `kind` | `instance` (Instance monitors, every user) or `physical` (Physical server monitors, admins only). Defaults to `physical` when the key starts with `physical`, otherwise `instance` |
 | `variables` | The dashboard's own variables, used as `$name` in its queries: constants, or query variables picked in a dropdown (`label_values(...)`, see below) |
 | `legend_rows` | Default `legend_rows` of the dashboard's panels (4 when not set) |
+| `graph_tooltip` | What pointing at a time series chart shows on the page's other charts, like Grafana's *Graph tooltip*: `default` (nothing, each chart on its own), `shared_crosshair` (a line at the same time) or `shared_tooltip` (the line and every chart's values). Users can change it on the page |
 | `discover` | Series selector that lists what can be picked (see below) |
 | `panels` | The panels, in display order |
 

@@ -5,6 +5,7 @@
  * `$project_id` to their own project.
  */
 import { api, useQuery } from "@rassvet/sdk";
+import type { GraphTooltip } from "./hover";
 
 export const BASE = "/ext/monitors";
 
@@ -52,6 +53,8 @@ export interface Dashboard {
   variables: { name: string; query: boolean }[];
   /** Show Rassvet's instance / server picker; off when the dashboard picks servers with its own variables. */
   server_picker: boolean;
+  /** Initial "Graph tooltip" mode of the page (users can change it). */
+  graph_tooltip: GraphTooltip;
   panels: Panel[];
 }
 

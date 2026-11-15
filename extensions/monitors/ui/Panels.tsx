@@ -16,6 +16,7 @@ import {
 import { Chart } from "./Chart";
 import { type RangeSpec, formatSpec, fromLocalInput, presetsFor, toLocalInput } from "./range";
 import { Gauges, Pie, Stats } from "./Viz";
+import { type GraphTooltip, isGraphTooltip } from "./hover";
 
 export function PanelGrid({
   dashboard,
@@ -191,6 +192,36 @@ export function DashboardPicker({ list, value, onChange }: { list: Dashboard[]; 
           value={value}
           onChange={onChange}
           options={list.map((d) => ({ value: d.id, label: d.title, description: d.title !== d.id ? d.id : undefined, icon: "layout-dashboard" }))}
+        />
+      )}
+    </Field>
+  );
+}
+
+/**
+ * The page's "Graph tooltip" mode: `?tooltip=` when the user picked one, else the dashboard's
+ * `graph_tooltip`.
+ */
+export function graphTooltipOf(params: URLSearchParams, dash: Dashboard | undefined): GraphTooltip {
+  const v = params.get("tooltip");
+  return isGraphTooltip(v) ? v : (dash?.graph_tooltip ?? "default");
+}
+
+/** Like Grafana's dashboard setting: what hovering one time series chart shows on the others. */
+export function GraphTooltipPicker({ value, onChange }: { value: GraphTooltip; onChange: (v: GraphTooltip) => void }) {
+  return (
+    <Field label={tr("Graph tooltip")}>
+      {(id) => (
+        <Picker
+          id={id}
+          className="w-48"
+          value={value}
+          onChange={(v) => isGraphTooltip(v) && onChange(v)}
+          options={[
+            { value: "default", label: tr("Default"), description: tr("Each graph on its own") },
+            { value: "shared_crosshair", label: tr("Shared crosshair"), description: tr("The hovered time on every graph") },
+            { value: "shared_tooltip", label: tr("Shared tooltip"), description: tr("The hovered time and values on every graph") },
+          ]}
         />
       )}
     </Field>

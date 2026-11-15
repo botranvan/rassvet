@@ -2,7 +2,18 @@
 import { ErrorNotice, Field, Mono, PageHeader, Picker, tr } from "@rassvet/sdk";
 import { type HostItem, useDashboards, useInfo, useTargets } from "./api";
 import { useParamSetter } from "./Instances";
-import { DashboardPicker, PanelGrid, RangeBar, VariableBar, pickedVars, useDashboardVars, useNow } from "./Panels";
+import {
+  DashboardPicker,
+  GraphTooltipPicker,
+  PanelGrid,
+  RangeBar,
+  VariableBar,
+  graphTooltipOf,
+  pickedVars,
+  useDashboardVars,
+  useNow,
+} from "./Panels";
+import { GraphTooltipProvider } from "./hover";
 import { formatSpec, parseRange, resolve } from "./range";
 
 export default function Hosts() {
@@ -39,6 +50,7 @@ function HostsPage({ maxDays }: { maxDays: number }) {
   const hostTarget = host ? { compute_node_id: host.compute_node_id || undefined, hostname: host.hostname || undefined } : {};
   const dv = useDashboardVars(dash, params, picker ? hostTarget : {}, range);
   const clearVars = Object.fromEntries(Object.keys(pickedVars(params)).map((k) => [`var-${k}`, null]));
+  const tooltip = graphTooltipOf(params, dash);
 
   return (
     <>
@@ -74,36 +86,42 @@ function HostsPage({ maxDays }: { maxDays: number }) {
         </Field>
         )}
         <VariableBar resolved={dv.resolved} loading={dv.loading} onChange={(name, v) => set({ [`var-${name}`]: v })} />
+        <GraphTooltipPicker
+          value={tooltip}
+          onChange={(v) => set({ tooltip: v === (dash?.graph_tooltip ?? "default") ? null : v })}
+        />
         <RangeBar spec={spec} maxDays={maxDays} onChange={(s) => set({ range: formatSpec(s) })} onRefresh={refresh} />
       </div>
       {(dashboards.error || targets.error || dv.error) && (
         <ErrorNotice error={dashboards.error ?? targets.error ?? dv.error} className="mb-4" />
       )}
-      {!dash ? (
-        dashboards.data && <p className="text-sm text-muted">{tr("No physical server dashboard is defined in the panel files.")}</p>
-      ) : !dv.vars ? (
-        !dv.error && <p className="text-sm text-muted">{tr("Loading…")}</p>
-      ) : !picker ? (
-        <PanelGrid dashboard={dash.id} panels={dash.panels} target={{ vars: dv.vars }} range={range} />
-      ) : hostId ? (
-        host ? (
-          <>
-            <h2 className="mb-3 text-sm font-semibold">{host.hostname || hostId}</h2>
-            <PanelGrid
-              dashboard={dash.id}
-              panels={target}
-              target={{ ...hostTarget, vars: dv.vars }}
-              range={range}
-            />
-          </>
+      <GraphTooltipProvider mode={tooltip}>
+        {!dash ? (
+          dashboards.data && <p className="text-sm text-muted">{tr("No physical server dashboard is defined in the panel files.")}</p>
+        ) : !dv.vars ? (
+          !dv.error && <p className="text-sm text-muted">{tr("Loading…")}</p>
+        ) : !picker ? (
+          <PanelGrid dashboard={dash.id} panels={dash.panels} target={{ vars: dv.vars }} range={range} />
+        ) : hostId ? (
+          host ? (
+            <>
+              <h2 className="mb-3 text-sm font-semibold">{host.hostname || hostId}</h2>
+              <PanelGrid
+                dashboard={dash.id}
+                panels={target}
+                target={{ ...hostTarget, vars: dv.vars }}
+                range={range}
+              />
+            </>
+          ) : (
+            targets.data && <p className="text-sm text-muted">{tr("This server has no metrics in this time range.")}</p>
+          )
+        ) : overview.length ? (
+          <PanelGrid dashboard={dash.id} panels={overview} target={{ vars: dv.vars }} range={range} />
         ) : (
-          targets.data && <p className="text-sm text-muted">{tr("This server has no metrics in this time range.")}</p>
-        )
-      ) : overview.length ? (
-        <PanelGrid dashboard={dash.id} panels={overview} target={{ vars: dv.vars }} range={range} />
-      ) : (
-        <p className="text-sm text-muted">{tr("Choose a physical server.")}</p>
-      )}
+          <p className="text-sm text-muted">{tr("Choose a physical server.")}</p>
+        )}
+      </GraphTooltipProvider>
     </>
   );
 }
