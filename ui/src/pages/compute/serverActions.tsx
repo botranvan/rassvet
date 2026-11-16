@@ -15,7 +15,9 @@ import { MetadataEditor, useMetadataErrors } from "@/components/MetadataEditor";
 import { useBootImages } from "@/lib/image";
 import { SERVER_METADATA } from "@/lib/metadefs";
 import {
+  attachableNetworks,
   deleteServer,
+  networkReach,
   type Server,
   gib,
   os,
@@ -417,7 +419,8 @@ function AttachInterfaceDialog({ server, onClose }: { server: Server; onClose: (
   const [portId, setPortId] = useState("");
   const subnets = useSubnets({ network_id: netId });
   const netName = useNetName();
-  const usable = (networks.data ?? []).filter((n) => n.status === "ACTIVE" && !n["router:external"]);
+  // Own and shared networks (shared external ones too), like the launch form.
+  const usable = attachableNetworks(networks.data, session.project?.id);
   const unbound = (freePorts.data ?? []).filter((p) => !p.device_id && !p.device_owner);
   return (
     <ActionDialog
@@ -460,7 +463,8 @@ function AttachInterfaceDialog({ server, onClose }: { server: Server; onClose: (
                 searchable
                 loading={networks.isPending}
                 placeholder={tr("Choose a network")}
-                options={usable.map((n) => ({ value: n.id, label: n.name || n.id, description: n.shared ? tr("shared") : undefined }))}
+                emptyText={tr("No network you can attach to. Create one, or ask for a network to be shared with this project.")}
+                options={usable.map((n) => ({ value: n.id, label: n.name || n.id, icon: "network", description: networkReach(n) }))}
               />
             )}
           </Field>

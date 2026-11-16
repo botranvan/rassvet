@@ -21,6 +21,8 @@ import {
   useInvalidate,
   useKeypairs,
   useNetworks,
+  attachableNetworks,
+  networkReach,
   usePorts,
   useSecurityGroups,
   useSnapshots,
@@ -187,9 +189,7 @@ export default function Launch() {
   const features = guestFeatures(flavor?.extra_specs, imageProps);
 
   // Networks the project can attach to (own + shared), external ones last.
-  const usableNets = (networks.data ?? [])
-    .filter((n) => n.status === "ACTIVE" && (n.project_id === session.project?.id || n.shared || !n["router:external"]))
-    .sort((a, b) => Number(!!a["router:external"]) - Number(!!b["router:external"]) || a.name.localeCompare(b.name));
+  const usableNets = attachableNetworks(networks.data, session.project?.id);
   const netName = (id: string) => networks.data?.find((n) => n.id === id)?.name ?? id;
   const cidrsOf = (id: string) => (subnets.data ?? []).filter((s) => s.network_id === id).map((s) => s.cidr);
   const defaultNics: Nic[] = usableNets
@@ -526,7 +526,7 @@ export default function Launch() {
                         icon: "network",
                         description: cidrsOf(n.id).join(", ") || tr("no subnet"),
                         keywords: cidrsOf(n.id).join(" "),
-                        meta: n["router:external"] ? tr("external") : n.shared ? tr("shared") : undefined,
+                        meta: networkReach(n),
                         disabled: chosenNics.some((x) => x.kind === "network" && x.id === n.id) ? tr("Already added") : false,
                       }))}
                     />

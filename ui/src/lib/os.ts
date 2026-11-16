@@ -704,6 +704,25 @@ export interface Network {
   dns_domain?: string;
 }
 
+/**
+ * Whether the project can put a port (an instance interface) on a network: its own networks,
+ * networks shared with it (to every project, or to this one by an RBAC `access_as_shared`
+ * rule: Neutron then reports `shared: true`), and any other internal network it can see. An
+ * external network that isn't shared with it only serves floating IPs and router gateways.
+ */
+export const canAttach = (n: Network, projectId: string | undefined) =>
+  n.project_id === projectId || n.shared || !n["router:external"];
+
+/** Active networks the project can attach to: internal ones first, then shared external ones; by name. */
+export const attachableNetworks = (list: Network[] | undefined, projectId: string | undefined) =>
+  (list ?? [])
+    .filter((n) => n.status === "ACTIVE" && canAttach(n, projectId))
+    .sort((a, b) => Number(!!a["router:external"]) - Number(!!b["router:external"]) || (a.name || a.id).localeCompare(b.name || b.id));
+
+/** "shared", "external" or "external, shared": how a network is reachable, for pickers. */
+export const networkReach = (n: Network) =>
+  n["router:external"] ? (n.shared ? tr("external, shared") : tr("external")) : n.shared ? tr("shared") : undefined;
+
 export interface Subnet {
   id: string;
   name: string;
