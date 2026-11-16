@@ -4851,6 +4851,8 @@ const vi: Record<string, string> = {
   "Each graph on its own": "Mỗi biểu đồ riêng",
   "The hovered time on every graph": "Thời điểm đang trỏ trên mọi biểu đồ",
   "The hovered time and values on every graph": "Thời điểm và giá trị đang trỏ trên mọi biểu đồ",
+  "external, shared": "external, dùng chung",
+  "No network you can attach to. Create one, or ask for a network to be shared with this project.": "Không có mạng nào để gắn. Hãy tạo một mạng, hoặc đề nghị chia sẻ một mạng với project này.",
 };
 
 export default vi;

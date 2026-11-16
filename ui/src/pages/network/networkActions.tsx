@@ -13,6 +13,8 @@ import {
   type Network,
   type Port,
   type Subnet,
+  canAttach,
+  networkReach,
   os,
   portLabel,
   useFloatingIps,
@@ -366,8 +368,8 @@ export function PortDialog({ port, network, onClose }: { port?: Port; network?: 
               loading={networks.isPending}
               placeholder={tr("Choose a network")}
               options={(networks.data ?? [])
-                .filter((n) => !n["router:external"] || session.is_admin)
-                .map((n) => ({ value: n.id, label: n.name || n.id, icon: "network", description: n.shared ? tr("shared") : undefined }))}
+                .filter((n) => session.is_admin || canAttach(n, session.project?.id))
+                .map((n) => ({ value: n.id, label: n.name || n.id, icon: "network", description: networkReach(n) }))}
             />
           )}
         </Field>
