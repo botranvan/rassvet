@@ -17,7 +17,7 @@ import { type Port, type Router, type Subnet, networkStatus, os, useInvalidate, 
 import { useSession } from "@/lib/session";
 import { useTab, useNewParam } from "@/lib/useTab";
 import { useNetName } from "./networkActions";
-import { RoutesTab, routerSubnets } from "./routerRoutes";
+import { AddRoutesDialog, RoutesTab, isRouterInterface, routerSubnets } from "./routerRoutes";
 import { tr, trx } from "@/lib/i18n";
 
 const gwText = (r: Router, netName: (id: string) => string) =>
@@ -49,7 +49,7 @@ function useSubnetOptions(exclude: Set<string>, skipNetwork?: string) {
   };
 }
 
-type Kind = "edit" | "gateway" | "clearGw" | "connect" | "disconnect" | "delete";
+type Kind = "edit" | "gateway" | "clearGw" | "connect" | "disconnect" | "routes" | "delete";
 
 export function useRouterActions({ onDeleted }: { onDeleted?: () => void } = {}) {
   const navigate = useNavigate();
@@ -62,6 +62,7 @@ export function useRouterActions({ onDeleted }: { onDeleted?: () => void } = {})
     { label: tr("Edit router"), icon: "edit", onSelect: dlg(r, "edit") },
     { label: tr("Connect subnet"), icon: "plus", onSelect: dlg(r, "connect") },
     { label: tr("Disconnect subnet"), icon: "unplug", onSelect: dlg(r, "disconnect") },
+    { label: tr("Add routes"), icon: "waypoints", onSelect: dlg(r, "routes") },
     r.external_gateway_info
       ? { label: tr("Clear gateway"), icon: "unlink", onSelect: dlg(r, "clearGw") }
       : { label: tr("Set gateway"), icon: "globe", onSelect: dlg(r, "gateway") },
@@ -90,6 +91,7 @@ export function useRouterActions({ onDeleted }: { onDeleted?: () => void } = {})
       )}
       {o.kind === "connect" && <ConnectSubnetDialog router={r} onClose={close} />}
       {o.kind === "disconnect" && <DisconnectSubnetDialog router={r} onClose={close} />}
+      {o.kind === "routes" && <AddRoutesDialog router={r} onClose={close} />}
       {o.kind === "delete" && (
         <ActionDialog
           onClose={close}
@@ -206,7 +208,7 @@ function DisconnectSubnetDialog({ router, onClose }: { router: Router; onClose: 
   const ports = usePorts({ device_id: router.id });
   const subnets = useSubnets();
   const netName = useNetName();
-  const ifaces = (ports.data ?? []).filter((p) => p.device_owner.startsWith("network:router_interface") || p.device_owner === "network:ha_router_replicated_interface");
+  const ifaces = (ports.data ?? []).filter(isRouterInterface);
   const [subnet, setSubnet] = useState("");
   return (
     <ActionDialog
@@ -426,7 +428,7 @@ export function RouterDetail() {
   const [disconnecting, setDisconnecting] = useState<{ port: Port; subnet: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const r = router.data;
-  const interfaces = (ports.data ?? []).filter((p) => p.device_owner.startsWith("network:router_interface") || p.device_owner === "network:ha_router_replicated_interface");
+  const interfaces = (ports.data ?? []).filter(isRouterInterface);
   const subnetOf = (sid: string): Subnet | undefined => subnets.data?.find((s) => s.id === sid);
 
   const columns: Column<Port>[] = [
