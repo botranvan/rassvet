@@ -17,6 +17,7 @@ import { type Port, type Router, type Subnet, networkStatus, os, useInvalidate, 
 import { useSession } from "@/lib/session";
 import { useTab, useNewParam } from "@/lib/useTab";
 import { useNetName } from "./networkActions";
+import { RoutesTab, routerSubnets } from "./routerRoutes";
 import { tr, trx } from "@/lib/i18n";
 
 const gwText = (r: Router, netName: (id: string) => string) =>
@@ -410,7 +411,7 @@ function CreateRouterDialog({ open, onClose }: { open: boolean; onClose: () => v
 
 // =========================================================================== detail
 
-const TABS = ["overview", "interfaces", "agents"] as const;
+const TABS = ["overview", "interfaces", "routes", "agents"] as const;
 
 export function RouterDetail() {
   const { id = "" } = useParams();
@@ -471,6 +472,7 @@ export function RouterDetail() {
             tabs={[
               { id: "overview", label: tr("Overview") },
               { id: "interfaces", label: tr("Interfaces ({length})", { length: interfaces.length }) },
+              { id: "routes", label: tr("Routes ({length})", { length: r.routes?.length ?? 0 }) },
               ...(session.is_admin ? [{ id: "agents" as const, label: tr("L3 agents") }] : []),
             ]}
           />
@@ -504,6 +506,14 @@ export function RouterDetail() {
             </div>
           )}
           {tab === "agents" && session.is_admin && <RouterAgents routerId={r.id} />}
+          {tab === "routes" && (
+            <RoutesTab
+              router={r}
+              subnets={routerSubnets(r, interfaces, subnetOf, netName)}
+              onRefresh={() => router.refetch()}
+              refreshing={router.isFetching}
+            />
+          )}
           {tab === "interfaces" && (
             <DataTable
               rows={ports.data ? interfaces : undefined}

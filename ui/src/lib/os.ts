@@ -808,6 +808,14 @@ export interface Router {
   };
   /** router-extend-ndp-proxy: NDP proxies can be created on this router. */
   enable_ndp_proxy?: boolean;
+  /** Extra routes (extraroute extension). */
+  routes?: RouterRoute[];
+}
+
+/** A static route of a router: traffic for `destination` (CIDR) goes to `nexthop`. */
+export interface RouterRoute {
+  destination: string;
+  nexthop: string;
 }
 
 export interface SecurityGroupRule {

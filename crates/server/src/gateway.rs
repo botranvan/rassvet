@@ -338,6 +338,9 @@ static RULES: &[Rule] = &[
     r(Network, M::DELETE, "routers/{id}"),
     r(Network, M::PUT, "routers/{id}/add_router_interface"),
     r(Network, M::PUT, "routers/{id}/remove_router_interface"),
+    // extraroute-atomic: add / remove extra routes without replacing the whole list.
+    r(Network, M::PUT, "routers/{id}/add_extraroutes"),
+    r(Network, M::PUT, "routers/{id}/remove_extraroutes"),
     r(Network, M::GET, "security-groups"),
     r(Network, M::GET, "security-groups/{id}"),
     r(Network, M::POST, "security-groups"),
