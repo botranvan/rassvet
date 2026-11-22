@@ -4853,6 +4853,9 @@ const vi: Record<string, string> = {
   "The hovered time and values on every graph": "Thời điểm và giá trị đang trỏ trên mọi biểu đồ",
   "external, shared": "external, dùng chung",
   "No network you can attach to. Create one, or ask for a network to be shared with this project.": "Không có mạng nào để gắn. Hãy tạo một mạng, hoặc đề nghị chia sẻ một mạng với project này.",
+  "No network you can attach to.": "Không có mạng nào để gắn.",
+  "No free port can join this trunk. Ports in use, already in a trunk or on the parent port's network can't.": "Không có port trống nào có thể vào trunk này. Port đang dùng, đã thuộc một trunk hoặc nằm trên mạng của port cha thì không được.",
+  "No free port can be a trunk parent. Ports in use or already in a trunk can't.": "Không có port trống nào có thể làm port cha của trunk. Port đang dùng hoặc đã thuộc một trunk thì không được.",
 };
 
 export default vi;
