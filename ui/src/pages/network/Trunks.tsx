@@ -12,7 +12,22 @@ import { Picker } from "@/components/Picker";
 import { Badge, Button, Card, Detail, ErrorNotice, Field, Icon, Input, Mono, PageHeader, StatusDot, Switch, Tabs, Textarea } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
 import { type SubPort, type Trunk, useTrunks } from "@/lib/neutron";
-import { type Port, networkStatus, os, portLabel, useInvalidate, useNetworks, useOsGet, usePorts, useServers } from "@/lib/os";
+import {
+  type Network,
+  type Port,
+  attachableNetworks,
+  canAttach,
+  networkReach,
+  networkStatus,
+  os,
+  portLabel,
+  useInvalidate,
+  useNetworks,
+  useOsGet,
+  usePorts,
+  useServers,
+} from "@/lib/os";
+import { useSession } from "@/lib/session";
 import { useTab } from "@/lib/useTab";
 import { tr, trx } from "@/lib/i18n";
 
@@ -23,6 +38,7 @@ function useLookups() {
   const ports = usePorts();
   const networks = useNetworks();
   const servers = useServers(useInAdmin() ? { all_tenants: 1 } : undefined);
+  const projectId = useSession().data?.project?.id;
   return useMemo(() => {
     const pm = new Map(ports.data?.map((p) => [p.id, p]));
     const nm = new Map(networks.data?.map((n) => [n.id, n]));
@@ -30,13 +46,47 @@ function useLookups() {
     return {
       ports,
       networks,
+      projectId,
+      /** Networks a trunk's ports can be on: the same rule as attaching an interface. */
+      usableNetworks: attachableNetworks(networks.data, projectId),
       port: (id: string) => pm.get(id),
       netName: (id?: string) => (id ? (nm.get(id)?.name ?? id) : ""),
       network: (id?: string) => (id ? nm.get(id) : undefined),
       serverName: (id: string) => sm.get(id),
     };
-  }, [ports, networks, servers.data]);
+  }, [ports, networks, servers.data, projectId]);
 }
+
+type Lookups = ReturnType<typeof useLookups>;
+
+/** The port is the project's and its network one the project can attach instances to. */
+function usablePort(p: Port, L: Lookups) {
+  const n: Network | undefined = L.network(p.network_id);
+  return (!p.project_id || p.project_id === L.projectId) && !!n && n.status === "ACTIVE" && canAttach(n, L.projectId);
+}
+
+/**
+ * Ports that can become a trunk's parent: free (Open vSwitch can't turn a port in use into a
+ * trunk), not in a trunk already and not a router / DHCP / floating IP port.
+ */
+const parentCandidate = (p: Port, L: Lookups) =>
+  !p.device_id && !p.device_owner && !p.trunk_details && usablePort(p, L);
+
+/** Ports that can join a trunk as sub-ports: free, not a trunk parent, not on the parent's network. */
+const subportCandidate = (p: Port, L: Lookups, parentId?: string, parentNet?: string) =>
+  !p.device_id && !p.device_owner && !p.trunk_details && p.id !== parentId && p.network_id !== parentNet && usablePort(p, L);
+
+/** Network options for a trunk's new ports. */
+const networkOptions = (L: Lookups, parentNet?: string) =>
+  L.usableNetworks.map((n) => ({
+    value: n.id,
+    label: n.name || n.id,
+    icon: "network",
+    description: [networkReach(n), n["provider:network_type"], n["provider:segmentation_id"] != null ? `seg ${n["provider:segmentation_id"]}` : ""]
+      .filter(Boolean)
+      .join(" · "),
+    disabled: n.id === parentNet ? tr("The parent port's network") : false,
+  }));
 
 export default function Trunks() {
   const trunks = useTrunks();
@@ -177,15 +227,25 @@ export function useTrunkActions({ onDeleted }: { onDeleted?: () => void } = {}) 
   return { items, dialogs, openDialog: (t: Trunk, kind: Kind) => setOpen({ kind, t }) };
 }
 
-/** Ports that can join a trunk: not attached to anything and not a trunk parent. */
-const freePort = (p: Port) => !p.device_id && !p.device_owner && !p.trunk_details;
-
 type NewSub = { mode: "existing" | "new"; port: string; network: string; type: "vlan" | "inherit"; vlan: string; sameMac: boolean };
 const blankSub = (): NewSub => ({ mode: "new", port: "", network: "", type: "vlan", vlan: "", sameMac: true });
 
-function SubportRows({ rows, set, parent, used }: { rows: NewSub[]; set: (rows: NewSub[]) => void; parent?: Port; used: Set<number> }) {
+function SubportRows({
+  rows,
+  set,
+  parent,
+  parentNet,
+  used,
+}: {
+  rows: NewSub[];
+  set: (rows: NewSub[]) => void;
+  parent?: Port;
+  /** Network of the parent port (also when it's still to be created). */
+  parentNet?: string;
+  used: Set<number>;
+}) {
   const L = useLookups();
-  const taken = new Set(rows.filter((r) => r.mode === "existing").map((r) => r.port));
+  const parentNetwork = parent?.network_id ?? parentNet;
   const patch = (i: number, p: Partial<NewSub>) => set(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
   return (
     <div className="space-y-3">
@@ -216,15 +276,8 @@ function SubportRows({ rows, set, parent, used }: { rows: NewSub[]; set: (rows: 
                   searchable
                   loading={L.networks.isPending}
                   placeholder={tr("Choose a network")}
-                  options={(L.networks.data ?? [])
-                    .filter((n) => !n["router:external"])
-                    .map((n) => ({
-                      value: n.id,
-                      label: n.name || n.id,
-                      icon: "network",
-                      description: [n["provider:network_type"], n["provider:segmentation_id"] != null ? `seg ${n["provider:segmentation_id"]}` : ""].filter(Boolean).join(" · "),
-                      disabled: n.id === parent?.network_id ? tr("The parent port's network") : false,
-                    }))}
+                  emptyText={tr("No network you can attach to.")}
+                  options={networkOptions(L, parentNetwork)}
                 />
               ) : (
                 <Picker
@@ -233,15 +286,16 @@ function SubportRows({ rows, set, parent, used }: { rows: NewSub[]; set: (rows: 
                   value={r.port}
                   onChange={(port) => patch(i, { port })}
                   searchable
-                  loading={L.ports.isPending}
+                  loading={L.ports.isPending || L.networks.isPending}
                   placeholder={tr("Choose a free port")}
+                  emptyText={tr("No free port can join this trunk. Ports in use, already in a trunk or on the parent port's network can't.")}
                   options={(L.ports.data ?? [])
-                    .filter((p) => freePort(p) && p.id !== parent?.id)
+                    // Not the ports chosen in the other rows.
+                    .filter((p) => subportCandidate(p, L, parent?.id, parentNetwork) && !rows.some((x, j) => j !== i && x.mode === "existing" && x.port === p.id))
                     .map((p) => ({
                       value: p.id,
                       label: portLabel(p),
                       description: `${L.netName(p.network_id)} · ${ips(p)}`,
-                      disabled: taken.has(p.id) && p.id !== r.port ? tr("Already chosen") : false,
                     }))}
                 />
               )}
@@ -358,7 +412,8 @@ function CreateTrunkDialog({ onClose }: { onClose: () => void }) {
                 onChange={setParentNet}
                 searchable
                 placeholder={tr("Network of the untagged traffic")}
-                options={(L.networks.data ?? []).filter((n) => !n["router:external"]).map((n) => ({ value: n.id, label: n.name || n.id, icon: "network" }))}
+                emptyText={tr("No network you can attach to.")}
+                options={networkOptions(L)}
               />
             ) : (
               <Picker
@@ -367,22 +422,33 @@ function CreateTrunkDialog({ onClose }: { onClose: () => void }) {
                 value={parentId}
                 onChange={setParentId}
                 searchable
-                loading={L.ports.isPending}
+                loading={L.ports.isPending || L.networks.isPending}
                 placeholder={tr("Choose a port")}
+                emptyText={tr("No free port can be a trunk parent. Ports in use or already in a trunk can't.")}
                 options={(L.ports.data ?? [])
-                  .filter((p) => !p.trunk_details && p.device_owner !== "trunk:subport" && !p.device_owner?.startsWith("network:"))
+                  // Not a port picked as a sub-port below.
+                  .filter((p) => parentCandidate(p, L) && !rows.some((r) => r.mode === "existing" && r.port === p.id))
                   .map((p) => ({
                     value: p.id,
                     label: portLabel(p),
                     description: `${L.netName(p.network_id)} · ${ips(p)}`,
-                    disabled: p.device_id ? tr("In use by {v}", { v: L.serverName(p.device_id) ?? tr("a device") }) : false,
                   }))}
               />
             )}
           </div>
         )}
       </Field>
-      <Field label={tr("Sub-ports")}>{() => <SubportRows rows={rows} set={setRows} parent={existingParent} used={new Set()} />}</Field>
+      <Field label={tr("Sub-ports")}>
+        {() => (
+          <SubportRows
+            rows={rows}
+            set={setRows}
+            parent={parentMode === "existing" ? existingParent : undefined}
+            parentNet={parentMode === "new" ? parentNet || undefined : undefined}
+            used={new Set()}
+          />
+        )}
+      </Field>
     </ActionDialog>
   );
 }
