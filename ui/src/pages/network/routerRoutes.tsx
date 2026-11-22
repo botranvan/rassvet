@@ -10,9 +10,14 @@ import { type Column, DataTable } from "@/components/DataTable";
 import { Button, Icon, Input, Mono } from "@/components/ui";
 import { type Cidr, cidrContains, cidrText, parseCidr } from "@/lib/ipmath";
 import { useNeutronExtensions } from "@/lib/neutron";
-import { type Port, type Router, type RouterRoute, type Subnet, os, useInvalidate } from "@/lib/os";
+import { type Port, type Router, type RouterRoute, type Subnet, os, useInvalidate, usePorts, useSubnets } from "@/lib/os";
 import { tr, trx } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useNetName } from "./networkActions";
+
+/** A router's own interface ports (HA routers have replicated ones). */
+export const isRouterInterface = (p: Port) =>
+  p.device_owner.startsWith("network:router_interface") || p.device_owner === "network:ha_router_replicated_interface";
 
 const routeKey = (r: RouterRoute) => `${r.destination}|${r.nexthop}`;
 
@@ -138,6 +143,22 @@ export function RoutesTab({ router, subnets, onRefresh, refreshing }: { router: 
       )}
     </>
   );
+}
+
+/**
+ * "Add routes" from a router's Actions menu (list or detail page): the same dialog as the
+ * Routes tab's, loading the router's subnets itself.
+ */
+export function AddRoutesDialog({ router, onClose }: { router: Router; onClose: () => void }) {
+  const ports = usePorts({ device_id: router.id });
+  const subnets = useSubnets();
+  const netName = useNetName();
+  const ext = useNeutronExtensions();
+  // Opens once the subnets are known, so the next hops are checked against them.
+  if (ports.isPending || subnets.isPending || ext.isPending) return null;
+  const subnetOf = (id: string) => subnets.data?.find((s) => s.id === id);
+  const list = routerSubnets(router, (ports.data ?? []).filter(isRouterInterface), subnetOf, netName);
+  return <RoutesDialog router={router} subnets={list} atomic={!!ext.data?.has("extraroute-atomic")} onClose={onClose} />;
 }
 
 type Row = { destination: string; nexthop: string };

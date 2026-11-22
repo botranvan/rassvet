@@ -36,8 +36,13 @@ subnet** to add more subnets (IPv6, allocation pools, host routes).
 ![Create router](../images/project/dlg-router.png)
 
 To connect more subnets later: router **⋮ → Connect subnet** (or the **Interfaces** tab on the router's
-page). Other router actions: **Change gateway**, **Clear gateway**, **Disconnect subnet**, **Edit router**,
-**Delete router**.
+page). Other router actions: **Add routes**, **Change gateway**, **Clear gateway**, **Disconnect subnet**,
+**Edit router**, **Delete router**.
+
+**Extra routes** send traffic for a destination network to a next hop on one of the router's subnets (a VPN
+appliance, another router): router **⋮ → Add routes**, or the **Routes** tab on the router's page, which
+lists them with the subnet each next hop is reached through and lets you edit or remove them. The next hop
+must be in a subnet connected to the router, or in its external gateway's subnet.
 
 ![Router page](../images/project/router-detail.png)
 
