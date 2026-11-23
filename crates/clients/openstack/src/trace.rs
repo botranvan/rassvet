@@ -163,6 +163,13 @@ fn redact(v: &mut Value) {
                 {
                     *x = Value::String("***".into());
                 } else {
+                    // Keystone token auth (switching project): {"token": {"id": "<the token>"}}.
+                    if norm == "token"
+                        && let Some(id) = x.get_mut("id")
+                        && id.is_string()
+                    {
+                        *id = Value::String("***".into());
+                    }
                     redact(x);
                 }
             }
@@ -286,6 +293,12 @@ mod tests {
             assert!(out.contains(kept), "{kept} missing: {out}");
         }
         assert!(out.contains("\"user\":{"), "{out}");
+
+        // Re-scoping with a token sends the token as the "id" of a "token" object.
+        let rescope = br#"{"auth":{"identity":{"methods":["token"],"token":{"id":"gAAAA-live-token"}},"scope":{"project":{"id":"p1"}}}}"#;
+        let out = describe("application/json", rescope);
+        assert!(!out.contains("gAAAA-live-token"), "{out}");
+        assert!(out.contains(r#""project":{"id":"p1"}"#), "{out}");
     }
 
     #[test]
