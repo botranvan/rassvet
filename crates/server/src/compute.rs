@@ -394,8 +394,9 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
         root.apply(boot)?;
     }
 
-    // Data volumes: boot_index -1 keeps them out of the boot order.
-    for v in &req.volumes {
+    // Data volumes follow the root disk (boot_index 0) in the wizard's order: 1, 2, 3…
+    // (Nova wants the indexes to run from 0 without gaps).
+    for (i, v) in req.volumes.iter().enumerate() {
         let mut d = match (&v.volume_id, &v.image_id, v.size) {
             (Some(id), _, _) => {
                 seg(id)?;
@@ -411,7 +412,7 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
             _ => return Err(bad("each extra volume needs an existing volume, or a size")),
         };
         v.placement.apply(&mut d)?;
-        d["boot_index"] = json!(-1);
+        d["boot_index"] = json!(i + 1);
         d["delete_on_termination"] = json!(v.delete_on_termination);
         if v.volume_id.is_none()
             && let Some(t) = v.volume_type.as_deref().filter(|t| !t.is_empty())
@@ -862,9 +863,11 @@ mod tests {
         assert_eq!(s["networks"][1]["port"], "port-9");
         let bdm = s["block_device_mapping_v2"].as_array().unwrap();
         assert_eq!(bdm.len(), 3);
+        assert_eq!(bdm[0]["boot_index"], 0);
         assert_eq!(bdm[1]["uuid"], "vol-7");
-        assert_eq!(bdm[1]["boot_index"], -1);
+        assert_eq!(bdm[1]["boot_index"], 1);
         assert_eq!(bdm[2]["source_type"], "blank");
+        assert_eq!(bdm[2]["boot_index"], 2);
         assert_eq!(bdm[2]["volume_size"], 50);
         assert_eq!(bdm[2]["volume_type"], "ssd");
 
@@ -873,6 +876,11 @@ mod tests {
         let b = build_server(&l, Some(Microversion::new(2, 100))).unwrap();
         let bdm = b["server"]["block_device_mapping_v2"].as_array().unwrap();
         assert_eq!(bdm[0]["destination_type"], "local");
+        let order: Vec<i64> = bdm
+            .iter()
+            .map(|d| d["boot_index"].as_i64().unwrap())
+            .collect();
+        assert_eq!(order, [0, 1, 2]);
         assert_eq!(b["server"]["imageRef"], "img-1");
 
         // Disk placement: device name, bus, type; root bus.

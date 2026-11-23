@@ -134,6 +134,26 @@ INFO request{request_id=req-6df3…}: rassvet::openstack: OpenStack call service
 INFO request{request_id=req-6df3…}: rassvet::http: request method=GET path="/api/os/compute/servers/…" status=404 ms=12
 ```
 
+With `level = "debug"` (or a filter that sets these targets to `debug`), every OpenStack call also logs what
+was exchanged, as JSON:
+
+| Target | Logs |
+|--------|------|
+| `rassvet::openstack::request` | Method, URL and body Rassvet sent to OpenStack |
+| `rassvet::openstack::response` | Status, service request id and body OpenStack answered |
+
+```
+DEBUG request{request_id=req-6df3…}: rassvet::openstack::request: OpenStack request service="compute" method=POST url=https://nova…/v2.1/servers body={"server":{"adminPass":"***","flavorRef":"…","name":"web-1",…}}
+DEBUG request{request_id=req-6df3…}: rassvet::openstack::response: OpenStack response service="compute" method=POST path="/v2.1/servers" status=202 upstream_request_id="req-6b79…" body={"server":{"adminPass":"***","id":"…",…}}
+```
+
+Pick what you need with a filter, e.g. requests but not responses:
+`level = "rassvet=info,rassvet::openstack=info,rassvet::openstack::request=debug"`. Secrets in bodies
+(passwords, TOTP codes, application credential and EC2 secrets, Barbican payloads, private keys, user data,
+tokens) are written as `"***"`; tokens sent in headers aren't logged. Bodies that aren't JSON (image and
+object uploads / downloads, secret payloads) are logged as their size only and still stream; JSON bodies
+are cut after 16 KiB. Debug logs show your users' resources: turn them on for troubleshooting only.
+
 ## Develop
 
 ```sh

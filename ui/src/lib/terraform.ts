@@ -116,7 +116,6 @@ export interface TfGen {
 const T = {
   server: "openstack_compute_instance_v2",
   volume: "openstack_blockstorage_volume_v3",
-  attach: "openstack_compute_volume_attach_v2",
   network: "openstack_networking_network_v2",
   subnet: "openstack_networking_subnet_v2",
   router: "openstack_networking_router_v2",
@@ -538,13 +537,12 @@ export function generate(
   }
 
   // ---- instances
-  const attachments: { server: Server; vol: string }[] = [];
   if (servers.length) section("Instances");
   for (const s of servers) {
     const sname = nm.get(T.server, s.id)!;
-    const attached = (s["os-extended-volumes:volumes_attached"] ?? []).map((a) => a.id);
+    const attached = s["os-extended-volumes:volumes_attached"] ?? [];
     const root = s.image ? null : bootVolume(s, input.volumes);
-    for (const vid of attached) if (vid !== root?.id) attachments.push({ server: s, vol: vid });
+    const data = dataVolumes(s, input.volumes, root?.id);
     const sgNames = [...new Set((s.security_groups ?? []).map((g) => g.name))];
     const sgExprs = sgNames.map((n) => {
       const g = secgroups.find((x) => x.name === n);
@@ -563,6 +561,9 @@ export function generate(
       ["tags", s.tags?.length ? list(s.tags.map(str)) : null],
     ]);
     if (s.metadata && Object.keys(s.metadata).length) body.push("", `metadata = ${map(s.metadata).join("\n  ")}`);
+    // Every disk is a block_device, numbered like the launch wizard: the root disk 0, then
+    // the data volumes 1, 2, 3… (in device order, /dev/vdb, /dev/vdc…).
+    const deleteOnTerm = (id: string) => (attached.find((a) => a.id === id)?.delete_on_termination ? "true" : "false");
     if (root) {
       const rv = ref(T.volume, root.id, root.name);
       body.push(
@@ -572,13 +573,39 @@ export function generate(
         '  source_type           = "volume"',
         '  destination_type      = "volume"',
         "  boot_index            = 0",
-        `  delete_on_termination = ${(s["os-extended-volumes:volumes_attached"] ?? []).find((a) => a.id === root.id)?.delete_on_termination ? "true" : "false"}`,
+        `  delete_on_termination = ${deleteOnTerm(root.id)}`,
+        "}",
+      );
+    } else if (s.image && data.length) {
+      // Booting from the image on local disk: Nova wants the image as mapping 0 when other
+      // block devices are given.
+      body.push(
+        "",
+        "block_device {",
+        `  uuid                  = ${lookImage(s.image.id)}`,
+        '  source_type           = "image"',
+        '  destination_type      = "local"',
+        "  boot_index            = 0",
+        "  delete_on_termination = true",
         "}",
       );
     } else if (!s.image) {
       body.push("", "# Boots from a volume that couldn't be identified: add a block_device for it.");
       notes.push(`${s.name}: boot volume not found; add its block_device by hand.`);
     }
+    data.forEach((v, i) => {
+      const vr = ref(T.volume, v.id, v.name);
+      body.push(
+        "",
+        "block_device {",
+        `  uuid                  = ${vr.expr}${vr.comment}`,
+        '  source_type           = "volume"',
+        '  destination_type      = "volume"',
+        `  boot_index            = ${i + 1}`,
+        `  delete_on_termination = ${deleteOnTerm(v.id)}`,
+        "}",
+      );
+    });
     for (const n of serverNetworks(s, input)) {
       const net = ref(T.network, n.networkId, n.name);
       body.push("", "network {", `  uuid        = ${net.expr}${net.comment}`, ...(n.ip ? [`  fixed_ip_v4 = ${str(n.ip)}`] : []), "}");
@@ -592,20 +619,6 @@ export function generate(
       s.id,
       ["block_device", "user_data", "image_id", "image_name", "admin_pass", "config_drive", "network"].filter((k) => k !== "image_id" || !!s.image),
       s.image && !literal ? ["image_id"] : undefined,
-    );
-  }
-  for (const { server, vol } of attachments) {
-    const sname = nm.get(T.server, server.id)!;
-    const v = input.volumes.find((x) => x.id === vol);
-    const vr = ref(T.volume, vol, v?.name ?? vol);
-    block(
-      T.attach,
-      nm.name(T.attach, `${server.id}/${vol}`, `${sname}_${v?.name || vol.slice(0, 8)}`),
-      attrs([
-        ["instance_id", `${T.server}.${sname}.id`],
-        ["volume_id", `${vr.expr}${vr.comment}`],
-      ]),
-      `${server.id}/${vol}`,
     );
   }
 
@@ -702,6 +715,20 @@ function bootVolume(s: Server, volumes: Volume[]) {
     mine.find((v) => v.bootable === "true") ||
     null
   );
+}
+
+/**
+ * An instance's volumes other than its root disk, in device order (/dev/vdb, /dev/vdc…),
+ * which is the order they were attached in; volumes of unknown device last, in Nova's order.
+ */
+function dataVolumes(s: Server, volumes: Volume[], rootId?: string) {
+  const ids = (s["os-extended-volumes:volumes_attached"] ?? []).map((a) => a.id).filter((id) => id !== rootId);
+  const dev = (id: string) => volumes.find((v) => v.id === id)?.attachments.find((a) => a.server_id === s.id)?.device ?? "";
+  const byDevice = (a: string, b: string) =>
+    !dev(a) !== !dev(b) ? (dev(a) ? -1 : 1) : dev(a).length - dev(b).length || dev(a).localeCompare(dev(b));
+  return [...ids]
+    .sort(byDevice)
+    .map((id) => volumes.find((v) => v.id === id) ?? ({ id, name: "" } as Volume));
 }
 
 /** Networks of an instance in port order, with its fixed IPv4 on each. */

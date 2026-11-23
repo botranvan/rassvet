@@ -17,6 +17,8 @@ secure_cookies = false
 # Logging. RUST_LOG, when set, overrides `level`.
 [log]
 level = "info"            # or a filter, e.g. "rassvet=debug,rassvet::openstack=info"
+                          # debug also logs the JSON sent to / answered by OpenStack (secrets as "***"):
+                          # targets rassvet::openstack::request and rassvet::openstack::response
 format = "text"           # text | json
 stdout = true
 # file = "/var/log/rassvet/rassvet.log"   # directory is created if missing
