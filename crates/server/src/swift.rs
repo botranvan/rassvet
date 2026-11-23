@@ -236,7 +236,7 @@ async fn info(ctx: RequestContext) -> ApiResult {
     let ep = account_url(&ctx, None)?;
     let resp = send(ctx.request(Method::HEAD, &ep)).await?;
     let caps = match info_url(&ep) {
-        Some(u) => match ctx.http.get(&u).send().await {
+        Some(u) => match rassvet_os_client::trace::exec("object-store", ctx.http.get(&u)).await {
             Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or(Value::Null),
             _ => Value::Null,
         },

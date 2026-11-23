@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 chrono.workspace = true
+http.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -16,5 +17,6 @@ tracing.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 tokio.workspace = true
 wiremock.workspace = true
