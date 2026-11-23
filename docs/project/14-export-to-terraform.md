@@ -46,3 +46,6 @@ terraform apply
   the same project.
 - Images looked up by name use the most recent image with that name; `image_id` is ignored after creation so
   a newer upload doesn't rebuild your instances.
+- An instance's disks are `block_device` blocks, one per disk: the root disk with `boot_index = 0` (or the
+  image, for an instance booting on local disk that has volumes), then each attached volume with 1, 2, 3… in
+  device order (`/dev/vdb`, `/dev/vdc`…). Changing these blocks later makes Terraform rebuild the instance.
