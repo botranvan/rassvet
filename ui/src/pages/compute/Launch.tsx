@@ -110,8 +110,8 @@ const placementBody = (p: Placement) => ({
   disk_bus: p.diskBus || undefined,
   device_type: p.deviceType || undefined,
 });
-/** Columns of a data volume row (disk, source, size, type, on delete, options); stacks when the card is narrow. */
-const VOL_GRID = "grid-cols-[3rem_minmax(0,1fr)] @3xl:grid-cols-[3rem_minmax(0,1fr)_7rem_11rem_auto_auto]";
+/** Size, volume type and the third item (delete / device) of a disk, side by side when there is room. */
+const DISK_FIELDS = "grid items-end gap-3 @lg:grid-cols-[9rem_minmax(0,1fr)_auto]";
 const DEVICE_NAME = /^(\/dev\/)?[a-z][a-z0-9]{1,15}$/;
 
 let seq = 0;
@@ -153,6 +153,7 @@ export default function Launch() {
   const [volumeType, setVolumeType] = useState("");
   const [rootBus, setRootBus] = useState("");
   const [rootDeviceType, setRootDeviceType] = useState("");
+  const [rootOpen, setRootOpen] = useState(false);
   // "" = not chosen yet: use "__DEFAULT__" or the first type the cloud lists.
   const typeFallback = defaultVolumeType(types.data);
   const rootType = volumeType || typeFallback;
@@ -179,6 +180,11 @@ export default function Launch() {
   const bootVolumes = (volumes.data ?? []).filter((v) => v.status === "available" && v.bootable === "true");
   const freeSnapshots = (snapshots.data ?? []).filter((s) => s.status === "available");
   const image = kind === "image" ? images.data?.find((i) => i.id === sourceId) : undefined;
+  // An ISO usually boots as a CD-ROM: show the root disk's Device settings (with that hint).
+  const isIso = image?.disk_format === "iso";
+  useEffect(() => {
+    if (isIso) setRootOpen(true);
+  }, [isIso, sourceId]);
   const volume = kind === "volume" ? bootVolumes.find((v) => v.id === sourceId) : undefined;
   const snap = kind === "volume_snapshot" ? freeSnapshots.find((s) => s.id === sourceId) : undefined;
   const newVolume = (kind === "image" && bfv) || kind === "volume_snapshot";
@@ -420,31 +426,57 @@ export default function Launch() {
                     hint={tr("Recommended. The disk lives in Cinder, survives host failures and can be snapshotted, resized and moved. Turn off to use the hypervisor's local disk.")}
                   />
                 )}
+                {/* Like a data volume: size, type and the Device settings on one line. */}
+                <div className="grid items-end gap-3 sm:grid-cols-[10rem_minmax(0,1fr)_auto]">
+                  {newVolume ? (
+                    <>
+                      <Field label={tr("Volume size (GiB)")}>
+                        {(id) => <Input id={id} type="number" min={minSize} value={rootSize} onChange={(e) => setSize(Number(e.target.value) || 0)} className="tabular-nums" />}
+                      </Field>
+                      <Field label={tr("Volume type")}>
+                        {(id) => <VolumeTypePicker id={id} value={rootType} onChange={setVolumeType} types={types.data} />}
+                      </Field>
+                    </>
+                  ) : kind === "volume" ? (
+                    <>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-sm font-medium">{tr("Size")}</span>
+                        <span className="flex h-10 items-center text-sm tabular-nums">{volume ? tr("{size} GiB", { size: volume.size }) : "—"}</span>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <span className="text-sm font-medium">{tr("Volume type")}</span>
+                        <span className="flex h-10 items-center truncate text-sm">{volume?.volume_type ?? "—"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="flex min-h-10 items-center text-sm text-muted sm:col-span-2">{tr("The root disk is the image, on the hypervisor's local disk.")}</p>
+                  )}
+                  <div className="flex h-10 items-center">
+                    <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
+                  </div>
+                </div>
                 {newVolume && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={tr("Volume size (GiB)")} hint={tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}>
-                      {(id) => <Input id={id} type="number" min={minSize} value={rootSize} onChange={(e) => setSize(Number(e.target.value) || 0)} />}
+                  <p className="-mt-2 text-xs text-muted">
+                    {tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}
+                  </p>
+                )}
+                {rootOpen && (
+                  <div className="grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 sm:grid-cols-2">
+                    <Field label={tr("Disk bus")} hint={tr("Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
+                      {(id) => <Picker id={id} size="sm" className="h-9" value={rootBus} onChange={setRootBus} options={DISK_BUSES} panelWidth={300} />}
                     </Field>
-                    <Field label={tr("Volume type")}>
-                      {(id) => <VolumeTypePicker id={id} value={rootType} onChange={setVolumeType} types={types.data} />}
+                    <Field
+                      label={tr("Device type")}
+                      hint={
+                        image?.disk_format === "iso" && !rootDeviceType
+                          ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
+                          : tr("Default is disk.")
+                      }
+                    >
+                      {(id) => <Picker id={id} size="sm" className="h-9" value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} panelWidth={300} />}
                     </Field>
                   </div>
                 )}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={tr("Root disk bus")} hint={tr("Optional. Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
-                    {(id) => <Picker id={id} value={rootBus} onChange={setRootBus} options={DISK_BUSES} />}
-                  </Field>
-                  <Field
-                    label={tr("Root device type")}
-                    hint={
-                      image?.disk_format === "iso" && !rootDeviceType
-                        ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
-                        : tr("Optional. Like the data volumes' device type; Default is disk.")
-                    }
-                  >
-                    {(id) => <Picker id={id} value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} />}
-                  </Field>
-                </div>
                 {kind !== "image" || bfv ? (
                   <Switch
                     checked={deleteOnTerm}
@@ -585,16 +617,6 @@ export default function Launch() {
           {step === "volumes" && (
             <Card title={tr("Data volumes")} flush actions={<span className="text-xs text-muted">{tr("Attached after the root disk, in this order")}</span>}>
               <div className="@container">
-                {extras.length > 0 && (
-                  <div className={cn(VOL_GRID, "hidden border-b border-line px-5 py-2 text-xs font-medium text-muted @3xl:grid")}>
-                    <span>{tr("Disk")}</span>
-                    <span>{tr("Source")}</span>
-                    <span>{tr("Size")}</span>
-                    <span>{tr("Volume type")}</span>
-                    <span>{tr("On delete")}</span>
-                    <span className="sr-only">{tr("Options")}</span>
-                  </div>
-                )}
                 <ul>
                   {extras.map((e, i) => {
                     const v = e.kind === "existing" ? volumes.data?.find((x) => x.id === e.id) : undefined;
@@ -602,24 +624,25 @@ export default function Launch() {
                     const guess = `/dev/vd${"bcdefghijklmnopq"[i]}`;
                     const custom = !!(e.deviceName || e.diskBus || e.deviceType);
                     const badName = !!e.deviceName.trim() && !DEVICE_NAME.test(e.deviceName.trim());
-                    const label = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
+                    const label = (t: string) => <span className="text-xs font-medium text-muted">{t}</span>;
                     return (
                       <li key={e.key} className="border-b border-line px-5 py-3 text-sm last:border-0">
-                        <div className={cn(VOL_GRID, "grid items-center gap-x-3 gap-y-2")}>
-                          <span className="grid h-7 w-fit place-items-center rounded-md bg-ink/6 px-2 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
+                        {/* Disk, what it is, and its buttons: one line at every width. */}
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="grid h-7 w-11 shrink-0 place-items-center rounded-md bg-ink/6 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
                             {e.deviceName.trim() ? e.deviceName.trim().replace(/^\/dev\//, "") : guess.slice(5)}
                           </span>
-                          <div className="flex min-w-0 items-center gap-2 @max-3xl:col-span-full @max-3xl:row-start-2">
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
                             {e.kind === "existing" ? (
                               <>
-                                <Icon name="hard-drive" className="text-muted" />
+                                <Icon name="hard-drive" className="shrink-0 text-muted" />
                                 <span className="min-w-0">
-                                  <span className="block truncate font-medium">{v?.name || e.id}</span>
+                                  <span className="block truncate font-medium" title={v?.name || e.id}>{v?.name || e.id}</span>
                                   <span className="block text-xs text-muted">{tr("Existing volume")}</span>
                                 </span>
                               </>
                             ) : e.kind === "image" ? (
-                              <div className="min-w-0 flex-1">
+                              <div className="min-w-0 flex-1 @xl:max-w-md">
                                 <Picker
                                   aria-label={tr("Image")}
                                   size="sm"
@@ -643,15 +666,22 @@ export default function Launch() {
                               </div>
                             ) : (
                               <>
-                                <Icon name="plus" className="text-muted" />
-                                <span className="font-medium">{tr("New blank volume")}</span>
+                                <Icon name="plus" className="shrink-0 text-muted" />
+                                <span className="truncate font-medium">{tr("New blank volume")}</span>
                               </>
                             )}
                           </div>
-                          <div className="flex flex-col gap-1 @max-3xl:col-span-full">
+                          <div className="flex shrink-0 items-center gap-1">
+                            <DeviceButton open={!!e.open} summary={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : ""} onClick={() => set({ open: !e.open })} />
+                            <IconBtn label={tr("Remove")} icon="x" onClick={() => setExtras((l) => l.filter((x) => x.key !== e.key))} />
+                          </div>
+                        </div>
+                        {/* Size, type and delete-with-instance side by side, under the title. */}
+                        <div className={cn(DISK_FIELDS, "mt-2 @md:pl-14")}>
+                          <div className="flex flex-col gap-1">
                             {label(tr("Size"))}
                             {e.kind === "existing" ? (
-                              <span className="tabular-nums">{v ? tr("{size} GiB", { size: v.size }) : "—"}</span>
+                              <span className="flex h-9 items-center tabular-nums">{v ? tr("{size} GiB", { size: v.size }) : "—"}</span>
                             ) : (
                               <div className="relative">
                                 <Input
@@ -666,39 +696,21 @@ export default function Launch() {
                               </div>
                             )}
                           </div>
-                          <div className="flex min-w-0 flex-col gap-1 @max-3xl:col-span-full">
+                          <div className="flex min-w-0 flex-col gap-1">
                             {label(tr("Volume type"))}
                             {e.kind === "existing" ? (
-                              <span className="truncate">{v?.volume_type ?? "—"}</span>
+                              <span className="flex h-9 items-center truncate">{v?.volume_type ?? "—"}</span>
                             ) : (
                               <VolumeTypePicker value={e.type || typeFallback} onChange={(t) => set({ type: t } as Partial<Extra>)} types={types.data} size="sm" className="h-9" />
                             )}
                           </div>
-                          <label className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full" title={tr("Delete this volume when the instance is deleted")}>
+                          <label className="flex h-9 items-center gap-2 text-xs whitespace-nowrap text-muted" title={tr("Delete this volume when the instance is deleted")}>
                             <input type="checkbox" checked={e.dot} onChange={(ev) => set({ dot: ev.target.checked })} className="size-4 accent-cable" />
                             {tr("Delete with instance")}
                           </label>
-                          <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
-                            <button
-                              type="button"
-                              onClick={() => set({ open: !e.open })}
-                              aria-expanded={!!e.open}
-                              title={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : tr("Device name, bus and type")}
-                              className={cn(
-                                "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-ink/5",
-                                custom ? "bg-cable-soft/60 text-cable" : "text-muted",
-                                e.open && "bg-ink/5",
-                              )}
-                            >
-                              <Icon name="settings" className="size-3.5" />
-                              {tr("Device")}
-                              <Icon name="chevron-down" className={cn("size-3 transition-transform", e.open && "rotate-180")} />
-                            </button>
-                            <IconBtn label={tr("Remove")} icon="x" onClick={() => setExtras((l) => l.filter((x) => x.key !== e.key))} />
-                          </div>
                         </div>
                         {e.open && (
-                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-3 @3xl:ml-[3.75rem]">
+                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @md:ml-14 @xl:grid-cols-3">
                             <Field label={tr("Mount point (device)")} hint={badName ? tr("Use a name like /dev/vdb") : tr("Optional. The hypervisor may still pick its own.")}>
                               {(id) => (
                                 <Input
@@ -1244,6 +1256,27 @@ function SearchBox({ value, onChange, placeholder, className }: { value: string;
       <Icon name="search" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9 pl-9" />
     </div>
+  );
+}
+
+/** "Device ▾": opens a disk's advanced settings (mount point, bus, type); tinted when any is set. */
+function DeviceButton({ open, summary, onClick }: { open: boolean; summary: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      title={summary || tr("Device name, bus and type")}
+      className={cn(
+        "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
+        summary ? "bg-cable-soft/60 text-cable" : "text-muted",
+        open && "bg-ink/5",
+      )}
+    >
+      <Icon name="settings" className="size-3.5" />
+      {tr("Device")}
+      <Icon name="chevron-down" className={cn("size-3 transition-transform", open && "rotate-180")} />
+    </button>
   );
 }
 
