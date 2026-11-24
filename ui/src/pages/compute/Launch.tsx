@@ -195,6 +195,10 @@ export default function Launch() {
   const minSize = kind === "image" ? imageMinGb(image) : (snap?.size ?? 1);
   const rootSize = size ?? Math.max(minSize, kind === "image" ? 10 : minSize);
   const flavor = flavors.data?.find((f) => f.id === flavorId);
+  /** The root disk row (Source step), like a data volume's. */
+  const rootName = image?.name || volume?.name || snap?.name || (sourceId && kind !== "image" ? sourceId : "");
+  const rootDevice = rootBus === "ide" ? "hda" : rootBus === "scsi" || rootBus === "sata" || rootBus === "usb" ? "sda" : "vda";
+  const rootLabel = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
   // Image properties the guest gets (vTPM, memory encryption…): the image's, or the boot volume's copy.
   const imageProps: Record<string, unknown> = image ?? volume?.volume_image_metadata ?? {};
   const features = guestFeatures(flavor?.extra_specs, imageProps);
@@ -430,65 +434,100 @@ export default function Launch() {
                     hint={tr("Recommended. The disk lives in Cinder, survives host failures and can be snapshotted, resized and moved. Turn off to use the hypervisor's local disk.")}
                   />
                 )}
-                {/* Like a data volume: size, type and the Device settings on one line. */}
-                <div className="grid items-end gap-3 sm:grid-cols-[10rem_minmax(0,1fr)_auto]">
-                  {newVolume ? (
-                    <>
-                      <Field label={tr("Volume size (GiB)")}>
-                        {(id) => <Input id={id} type="number" min={minSize} value={rootSize} onChange={(e) => setSize(Number(e.target.value) || 0)} className="tabular-nums" />}
-                      </Field>
-                      <Field label={tr("Volume type")}>
-                        {(id) => <VolumeTypePicker id={id} value={rootType} onChange={setVolumeType} types={types.data} />}
-                      </Field>
-                    </>
-                  ) : kind === "volume" ? (
-                    <>
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-sm font-medium">{tr("Size")}</span>
-                        <span className="flex h-10 items-center text-sm tabular-nums">{volume ? tr("{size} GiB", { size: volume.size }) : "—"}</span>
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-1.5">
-                        <span className="text-sm font-medium">{tr("Volume type")}</span>
-                        <span className="flex h-10 items-center truncate text-sm">{volume?.volume_type ?? "—"}</span>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="flex min-h-10 items-center text-sm text-muted sm:col-span-2">{tr("The root disk is the image, on the hypervisor's local disk.")}</p>
+                {/* The root disk as a row like the data volumes': same columns, Device settings below. */}
+                <div className="@container">
+                  <div className={cn(VOL_GRID, "hidden gap-x-3 border-b border-line pb-2 text-xs font-medium text-muted @3xl:grid")}>
+                    <span>{tr("Disk")}</span>
+                    <span>{tr("Source")}</span>
+                    <span>{tr("Size")}</span>
+                    <span>{tr("Volume type")}</span>
+                    <span>{tr("On delete")}</span>
+                    <span className="sr-only">{tr("Options")}</span>
+                  </div>
+                  <div className={cn(VOL_GRID, "grid items-center gap-x-3 gap-y-2 py-3 text-sm")}>
+                    <span className="grid h-7 w-fit place-items-center rounded-md bg-ink/6 px-2 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
+                      {rootDevice}
+                    </span>
+                    <div className="flex min-w-0 items-center gap-2 @max-3xl:col-span-full @max-3xl:row-start-2">
+                      <Icon name={kind === "image" ? "disc-3" : kind === "volume" ? "hard-drive" : "camera"} className="shrink-0 text-muted" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium" title={rootName}>{rootName || tr("Choose a source above")}</span>
+                        {(() => {
+                          const what = kind === "volume" ? tr("Existing volume") : kind === "volume_snapshot" ? tr("New volume from the snapshot") : bfv ? tr("New volume from the image") : tr("Image on the hypervisor's local disk");
+                          return <span className="block truncate text-xs text-muted" title={what}>{what}</span>;
+                        })()}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1 @max-3xl:col-span-full">
+                      {rootLabel(tr("Size"))}
+                      {newVolume ? (
+                        <div className="relative">
+                          <Input
+                            aria-label={tr("Size in GiB")}
+                            type="number"
+                            min={minSize}
+                            value={rootSize}
+                            onChange={(e) => setSize(Number(e.target.value) || 0)}
+                            className="h-9 pr-11 tabular-nums"
+                          />
+                          <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted">{tr("GiB")}</span>
+                        </div>
+                      ) : kind === "volume" ? (
+                        <span className="tabular-nums">{volume ? tr("{size} GiB", { size: volume.size }) : "—"}</span>
+                      ) : (
+                        <span className="text-muted" title={tr("The flavor's root disk")}>{flavor ? tr("{size} GiB", { size: flavor.disk }) : tr("Flavor's disk")}</span>
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-1 @max-3xl:col-span-full">
+                      {rootLabel(tr("Volume type"))}
+                      {newVolume ? (
+                        <VolumeTypePicker value={rootType} onChange={setVolumeType} types={types.data} size="sm" className="h-9" />
+                      ) : kind === "volume" ? (
+                        <span className="truncate">{volume?.volume_type ?? "—"}</span>
+                      ) : (
+                        <span className="text-muted">{tr("Local disk")}</span>
+                      )}
+                    </div>
+                    {kind !== "image" || bfv ? (
+                      <label
+                        className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full"
+                        title={kind === "volume" ? tr("Off keeps your existing volume when the instance goes away.") : tr("Turn off to keep the root volume after deleting the instance.")}
+                      >
+                        <input type="checkbox" checked={deleteOnTerm} onChange={(ev) => setDeleteOnTerm(ev.target.checked)} className="size-4 accent-cable" />
+                        {tr("Delete with instance")}
+                      </label>
+                    ) : (
+                      <span className="text-xs text-muted @max-3xl:col-span-full" title={tr("A local disk always goes with the instance.")}>
+                        {tr("With the instance")}
+                      </span>
+                    )}
+                    <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
+                      <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
+                    </div>
+                  </div>
+                  {newVolume && (
+                    <p className="text-xs text-muted @3xl:ml-[3.75rem]">
+                      {tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}
+                    </p>
                   )}
-                  <div className="flex h-10 items-center">
-                    <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
-                  </div>
+                  {rootOpen && (
+                    <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-2 @3xl:ml-[3.75rem]">
+                      <Field label={tr("Disk bus")} hint={tr("Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
+                        {(id) => <Picker id={id} size="sm" className="h-9" value={rootBus} onChange={setRootBus} options={DISK_BUSES} panelWidth={300} />}
+                      </Field>
+                      <Field
+                        label={tr("Device type")}
+                        hint={
+                          image?.disk_format === "iso" && !rootDeviceType
+                            ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
+                            : tr("Default is disk.")
+                        }
+                      >
+                        {(id) => <Picker id={id} size="sm" className="h-9" value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} panelWidth={300} />}
+                      </Field>
+                    </div>
+                  )}
                 </div>
-                {newVolume && (
-                  <p className="-mt-2 text-xs text-muted">
-                    {tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}
-                  </p>
-                )}
-                {rootOpen && (
-                  <div className="grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 sm:grid-cols-2">
-                    <Field label={tr("Disk bus")} hint={tr("Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
-                      {(id) => <Picker id={id} size="sm" className="h-9" value={rootBus} onChange={setRootBus} options={DISK_BUSES} panelWidth={300} />}
-                    </Field>
-                    <Field
-                      label={tr("Device type")}
-                      hint={
-                        image?.disk_format === "iso" && !rootDeviceType
-                          ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
-                          : tr("Default is disk.")
-                      }
-                    >
-                      {(id) => <Picker id={id} size="sm" className="h-9" value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} panelWidth={300} />}
-                    </Field>
-                  </div>
-                )}
-                {kind !== "image" || bfv ? (
-                  <Switch
-                    checked={deleteOnTerm}
-                    onChange={setDeleteOnTerm}
-                    label={tr("Delete the volume when the instance is deleted")}
-                    hint={kind === "volume" ? tr("Off keeps your existing volume when the instance goes away.") : tr("Turn off to keep the root volume after deleting the instance.")}
-                  />
-                ) : null}
               </div>
             </Card>
           )}
