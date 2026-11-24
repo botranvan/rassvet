@@ -254,16 +254,24 @@ export function Switch({
   label,
   hint,
   disabled,
+  size = "md",
+  title,
+  className,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   hint?: ReactNode;
   disabled?: boolean;
+  /** "sm": a compact toggle with a small, plain label, for table rows. */
+  size?: "sm" | "md";
+  title?: string;
+  className?: string;
 }) {
   const id = useId();
+  const sm = size === "sm";
   return (
-    <div className="flex items-start gap-3">
+    <div className={cn("flex gap-3", sm ? "items-center gap-2" : "items-start", className)} title={title}>
       <button
         id={id}
         type="button"
@@ -272,19 +280,21 @@ export function Switch({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50",
+          "relative shrink-0 rounded-full transition-colors disabled:opacity-50",
+          sm ? "h-4 w-7" : "mt-0.5 h-5 w-9",
           checked ? "bg-cable" : "bg-ink/20",
         )}
       >
         <span
           className={cn(
-            "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform",
-            checked && "translate-x-4",
+            "absolute top-0.5 left-0.5 rounded-full bg-white shadow transition-transform",
+            sm ? "size-3" : "size-4",
+            checked && (sm ? "translate-x-3" : "translate-x-4"),
           )}
         />
       </button>
-      <label htmlFor={id} className="text-sm">
-        <span className="font-medium">{label}</span>
+      <label htmlFor={id} className={sm ? "cursor-pointer text-xs whitespace-nowrap text-muted" : "text-sm"}>
+        <span className={sm ? undefined : "font-medium"}>{label}</span>
         {hint && <span className="block text-xs text-muted">{hint}</span>}
       </label>
     </div>

@@ -489,13 +489,14 @@ export default function Launch() {
                       )}
                     </div>
                     {kind !== "image" || bfv ? (
-                      <label
-                        className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full"
+                      <Switch
+                        size="sm"
+                        className="@max-3xl:col-span-full"
+                        checked={deleteOnTerm}
+                        onChange={setDeleteOnTerm}
+                        label={tr("Delete with instance")}
                         title={kind === "volume" ? tr("Off keeps your existing volume when the instance goes away.") : tr("Turn off to keep the root volume after deleting the instance.")}
-                      >
-                        <input type="checkbox" checked={deleteOnTerm} onChange={(ev) => setDeleteOnTerm(ev.target.checked)} className="size-4 accent-cable" />
-                        {tr("Delete with instance")}
-                      </label>
+                      />
                     ) : (
                       <span className="text-xs text-muted @max-3xl:col-span-full" title={tr("A local disk always goes with the instance.")}>
                         {tr("With the instance")}
@@ -749,10 +750,14 @@ export default function Launch() {
                               <VolumeTypePicker value={e.type || typeFallback} onChange={(t) => set({ type: t } as Partial<Extra>)} types={types.data} size="sm" className="h-9" />
                             )}
                           </div>
-                          <label className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full" title={tr("Delete this volume when the instance is deleted")}>
-                            <input type="checkbox" checked={e.dot} onChange={(ev) => set({ dot: ev.target.checked })} className="size-4 accent-cable" />
-                            {tr("Delete with instance")}
-                          </label>
+                          <Switch
+                            size="sm"
+                            className="@max-3xl:col-span-full"
+                            checked={e.dot}
+                            onChange={(dot) => set({ dot })}
+                            label={tr("Delete with instance")}
+                            title={tr("Delete this volume when the instance is deleted")}
+                          />
                           <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
                             <button
                               type="button"
