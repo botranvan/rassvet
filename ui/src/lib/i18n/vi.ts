@@ -4890,6 +4890,18 @@ const vi: Record<string, string> = {
   "routes": "route",
   "Routes ({length})": "Route ({length})",
   "Traffic to {v} no longer goes to {v2}.": "Lưu lượng đến {v} không còn đi qua {v2}.",
+  "This is an ISO image: choose cdrom to boot it as an installer disc.": "Đây là image ISO: chọn cdrom để khởi động nó như một đĩa cài đặt.",
+  ", as {rootDeviceType}": ", dạng {rootDeviceType}",
+  "Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).": "Để Mặc định trừ khi máy khách cần một controller cụ thể (ví dụ không có driver virtio).",
+  "Default is disk.": "Mặc định là disk.",
+  "Choose a source above": "Chọn nguồn ở trên",
+  "New volume from the snapshot": "Volume mới từ snapshot",
+  "New volume from the image": "Volume mới từ image",
+  "Image on the hypervisor's local disk": "Image trên đĩa cục bộ của hypervisor",
+  "The flavor's root disk": "Đĩa gốc của flavor",
+  "Flavor's disk": "Đĩa của flavor",
+  "A local disk always goes with the instance.": "Đĩa cục bộ luôn bị xoá cùng máy ảo.",
+  "With the instance": "Cùng máy ảo",
 };
 
 export default vi;

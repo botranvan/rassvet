@@ -110,8 +110,12 @@ const placementBody = (p: Placement) => ({
   disk_bus: p.diskBus || undefined,
   device_type: p.deviceType || undefined,
 });
-/** Columns of a data volume row (disk, source, size, type, on delete, options); stacks when the card is narrow. */
-const VOL_GRID = "grid-cols-[3rem_minmax(0,1fr)] @3xl:grid-cols-[3rem_minmax(0,1fr)_7rem_11rem_auto_auto]";
+/**
+ * Columns of a data volume row (disk, source, size, type, on delete, options); stacks when the card is narrow.
+ * The header and every row are separate grids, so only the source column may stretch: the others have fixed
+ * widths, or the titles would drift away from their fields.
+ */
+const VOL_GRID = "grid-cols-[3rem_minmax(0,1fr)] @3xl:grid-cols-[3rem_minmax(0,1fr)_7rem_11rem_10.5rem_7.75rem]";
 const DEVICE_NAME = /^(\/dev\/)?[a-z][a-z0-9]{1,15}$/;
 
 let seq = 0;
@@ -152,6 +156,8 @@ export default function Launch() {
   const [size, setSize] = useState<number | null>(null);
   const [volumeType, setVolumeType] = useState("");
   const [rootBus, setRootBus] = useState("");
+  const [rootDeviceType, setRootDeviceType] = useState("");
+  const [rootOpen, setRootOpen] = useState(false);
   // "" = not chosen yet: use "__DEFAULT__" or the first type the cloud lists.
   const typeFallback = defaultVolumeType(types.data);
   const rootType = volumeType || typeFallback;
@@ -178,12 +184,21 @@ export default function Launch() {
   const bootVolumes = (volumes.data ?? []).filter((v) => v.status === "available" && v.bootable === "true");
   const freeSnapshots = (snapshots.data ?? []).filter((s) => s.status === "available");
   const image = kind === "image" ? images.data?.find((i) => i.id === sourceId) : undefined;
+  // An ISO usually boots as a CD-ROM: show the root disk's Device settings (with that hint).
+  const isIso = image?.disk_format === "iso";
+  useEffect(() => {
+    if (isIso) setRootOpen(true);
+  }, [isIso, sourceId]);
   const volume = kind === "volume" ? bootVolumes.find((v) => v.id === sourceId) : undefined;
   const snap = kind === "volume_snapshot" ? freeSnapshots.find((s) => s.id === sourceId) : undefined;
   const newVolume = (kind === "image" && bfv) || kind === "volume_snapshot";
   const minSize = kind === "image" ? imageMinGb(image) : (snap?.size ?? 1);
   const rootSize = size ?? Math.max(minSize, kind === "image" ? 10 : minSize);
   const flavor = flavors.data?.find((f) => f.id === flavorId);
+  /** The root disk row (Source step), like a data volume's. */
+  const rootName = image?.name || volume?.name || snap?.name || (sourceId && kind !== "image" ? sourceId : "");
+  const rootDevice = rootBus === "ide" ? "hda" : rootBus === "scsi" || rootBus === "sata" || rootBus === "usb" ? "sda" : "vda";
+  const rootLabel = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
   // Image properties the guest gets (vTPM, memory encryption…): the image's, or the boot volume's copy.
   const imageProps: Record<string, unknown> = image ?? volume?.volume_image_metadata ?? {};
   const features = guestFeatures(flavor?.extra_specs, imageProps);
@@ -268,6 +283,7 @@ export default function Launch() {
         volume_type: newVolume ? rootType || undefined : undefined,
         delete_on_termination: deleteOnTerm,
         root_disk_bus: rootBus || undefined,
+        root_device_type: rootDeviceType || undefined,
         flavor_id: flavorId,
         nics: chosenNics.map((n) =>
           n.kind === "network"
@@ -418,31 +434,101 @@ export default function Launch() {
                     hint={tr("Recommended. The disk lives in Cinder, survives host failures and can be snapshotted, resized and moved. Turn off to use the hypervisor's local disk.")}
                   />
                 )}
-                {newVolume && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={tr("Volume size (GiB)")} hint={tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}>
-                      {(id) => <Input id={id} type="number" min={minSize} value={rootSize} onChange={(e) => setSize(Number(e.target.value) || 0)} />}
-                    </Field>
-                    <Field label={tr("Volume type")}>
-                      {(id) => <VolumeTypePicker id={id} value={rootType} onChange={setVolumeType} types={types.data} />}
-                    </Field>
+                {/* The root disk as a row like the data volumes': same columns, Device settings below. */}
+                <div className="@container">
+                  <div className={cn(VOL_GRID, "hidden gap-x-3 border-b border-line pb-2 text-xs font-medium text-muted @3xl:grid")}>
+                    <span>{tr("Disk")}</span>
+                    <span>{tr("Source")}</span>
+                    <span>{tr("Size")}</span>
+                    <span>{tr("Volume type")}</span>
+                    <span>{tr("On delete")}</span>
+                    <span className="sr-only">{tr("Options")}</span>
                   </div>
-                )}
-                <Field label={tr("Root disk bus")} hint={tr("Optional. Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
-                  {(id) => (
-                    <div className="sm:max-w-xs">
-                      <Picker id={id} value={rootBus} onChange={setRootBus} options={DISK_BUSES} />
+                  <div className={cn(VOL_GRID, "grid items-center gap-x-3 gap-y-2 py-3 text-sm")}>
+                    <span className="grid h-7 w-fit place-items-center rounded-md bg-ink/6 px-2 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
+                      {rootDevice}
+                    </span>
+                    <div className="flex min-w-0 items-center gap-2 @max-3xl:col-span-full @max-3xl:row-start-2">
+                      <Icon name={kind === "image" ? "disc-3" : kind === "volume" ? "hard-drive" : "camera"} className="shrink-0 text-muted" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium" title={rootName}>{rootName || tr("Choose a source above")}</span>
+                        {(() => {
+                          const what = kind === "volume" ? tr("Existing volume") : kind === "volume_snapshot" ? tr("New volume from the snapshot") : bfv ? tr("New volume from the image") : tr("Image on the hypervisor's local disk");
+                          return <span className="block truncate text-xs text-muted" title={what}>{what}</span>;
+                        })()}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1 @max-3xl:col-span-full">
+                      {rootLabel(tr("Size"))}
+                      {newVolume ? (
+                        <div className="relative">
+                          <Input
+                            aria-label={tr("Size in GiB")}
+                            type="number"
+                            min={minSize}
+                            value={rootSize}
+                            onChange={(e) => setSize(Number(e.target.value) || 0)}
+                            className="h-9 pr-11 tabular-nums"
+                          />
+                          <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted">{tr("GiB")}</span>
+                        </div>
+                      ) : kind === "volume" ? (
+                        <span className="tabular-nums">{volume ? tr("{size} GiB", { size: volume.size }) : "—"}</span>
+                      ) : (
+                        <span className="text-muted" title={tr("The flavor's root disk")}>{flavor ? tr("{size} GiB", { size: flavor.disk }) : tr("Flavor's disk")}</span>
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-1 @max-3xl:col-span-full">
+                      {rootLabel(tr("Volume type"))}
+                      {newVolume ? (
+                        <VolumeTypePicker value={rootType} onChange={setVolumeType} types={types.data} size="sm" className="h-9" />
+                      ) : kind === "volume" ? (
+                        <span className="truncate">{volume?.volume_type ?? "—"}</span>
+                      ) : (
+                        <span className="text-muted">{tr("Local disk")}</span>
+                      )}
+                    </div>
+                    {kind !== "image" || bfv ? (
+                      <Switch
+                        size="sm"
+                        className="@max-3xl:col-span-full"
+                        checked={deleteOnTerm}
+                        onChange={setDeleteOnTerm}
+                        label={tr("Delete with instance")}
+                        title={kind === "volume" ? tr("Off keeps your existing volume when the instance goes away.") : tr("Turn off to keep the root volume after deleting the instance.")}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted @max-3xl:col-span-full" title={tr("A local disk always goes with the instance.")}>
+                        {tr("With the instance")}
+                      </span>
+                    )}
+                    <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
+                      <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
+                    </div>
+                  </div>
+                  {newVolume && (
+                    <p className="text-xs text-muted @3xl:ml-[3.75rem]">
+                      {tr("At least {minSize} GiB for this {v}.{v2}", { minSize, v: kind === "image" ? tr("image") : tr("snapshot"), v2: Number.isFinite(gbLeft) ? tr(" {gbLeft} GiB left in quota.", { gbLeft }) : "" })}
+                    </p>
+                  )}
+                  {rootOpen && (
+                    <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-2 @3xl:ml-[3.75rem]">
+                      <Field label={tr("Disk bus")} hint={tr("Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
+                        {(id) => <Picker id={id} size="sm" className="h-9" value={rootBus} onChange={setRootBus} options={DISK_BUSES} panelWidth={300} />}
+                      </Field>
+                      <Field
+                        label={tr("Device type")}
+                        hint={
+                          image?.disk_format === "iso" && !rootDeviceType
+                            ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
+                            : tr("Default is disk.")
+                        }
+                      >
+                        {(id) => <Picker id={id} size="sm" className="h-9" value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} panelWidth={300} />}
+                      </Field>
                     </div>
                   )}
-                </Field>
-                {kind !== "image" || bfv ? (
-                  <Switch
-                    checked={deleteOnTerm}
-                    onChange={setDeleteOnTerm}
-                    label={tr("Delete the volume when the instance is deleted")}
-                    hint={kind === "volume" ? tr("Off keeps your existing volume when the instance goes away.") : tr("Turn off to keep the root volume after deleting the instance.")}
-                  />
-                ) : null}
+                </div>
               </div>
             </Card>
           )}
@@ -576,7 +662,7 @@ export default function Launch() {
             <Card title={tr("Data volumes")} flush actions={<span className="text-xs text-muted">{tr("Attached after the root disk, in this order")}</span>}>
               <div className="@container">
                 {extras.length > 0 && (
-                  <div className={cn(VOL_GRID, "hidden border-b border-line px-5 py-2 text-xs font-medium text-muted @3xl:grid")}>
+                  <div className={cn(VOL_GRID, "hidden gap-x-3 border-b border-line px-5 py-2 text-xs font-medium text-muted @3xl:grid")}>
                     <span>{tr("Disk")}</span>
                     <span>{tr("Source")}</span>
                     <span>{tr("Size")}</span>
@@ -664,10 +750,14 @@ export default function Launch() {
                               <VolumeTypePicker value={e.type || typeFallback} onChange={(t) => set({ type: t } as Partial<Extra>)} types={types.data} size="sm" className="h-9" />
                             )}
                           </div>
-                          <label className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full" title={tr("Delete this volume when the instance is deleted")}>
-                            <input type="checkbox" checked={e.dot} onChange={(ev) => set({ dot: ev.target.checked })} className="size-4 accent-cable" />
-                            {tr("Delete with instance")}
-                          </label>
+                          <Switch
+                            size="sm"
+                            className="@max-3xl:col-span-full"
+                            checked={e.dot}
+                            onChange={(dot) => set({ dot })}
+                            label={tr("Delete with instance")}
+                            title={tr("Delete this volume when the instance is deleted")}
+                          />
                           <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
                             <button
                               type="button"
@@ -675,7 +765,7 @@ export default function Launch() {
                               aria-expanded={!!e.open}
                               title={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : tr("Device name, bus and type")}
                               className={cn(
-                                "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-ink/5",
+                                "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
                                 custom ? "bg-cable-soft/60 text-cable" : "text-muted",
                                 e.open && "bg-ink/5",
                               )}
@@ -823,6 +913,7 @@ export default function Launch() {
                   )}
                   {kind === "image" && !bfv && <span className="text-muted">{" "}{tr("on local disk")}</span>}
                   {rootBus && <span className="text-muted">{trx(", {rootBus} bus", { rootBus })}</span>}
+                  {rootDeviceType && <span className="text-muted">{trx(", as {rootDeviceType}", { rootDeviceType })}</span>}
                 </Row>
                 <Row label={tr("Flavor")} problem={problems.flavor} go={() => setStep("flavor")}>
                   {flavor ? tr("{name} ({vcpus} vCPU, {ram})", { name: flavor.name, vcpus: flavor.vcpus, ram: gib(flavor.ram) }) : "—"}
@@ -1233,6 +1324,27 @@ function SearchBox({ value, onChange, placeholder, className }: { value: string;
       <Icon name="search" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9 pl-9" />
     </div>
+  );
+}
+
+/** "Device ▾": opens a disk's advanced settings (mount point, bus, type); tinted when any is set. */
+function DeviceButton({ open, summary, onClick }: { open: boolean; summary: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      title={summary || tr("Device name, bus and type")}
+      className={cn(
+        "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
+        summary ? "bg-cable-soft/60 text-cable" : "text-muted",
+        open && "bg-ink/5",
+      )}
+    >
+      <Icon name="settings" className="size-3.5" />
+      {tr("Device")}
+      <Icon name="chevron-down" className={cn("size-3 transition-transform", open && "rotate-180")} />
+    </button>
   );
 }
 

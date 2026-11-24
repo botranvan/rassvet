@@ -162,6 +162,9 @@ pub struct Launch {
     /// Bus of the root disk (`virtio`, `scsi`, …); unset = Nova's/the image's default.
     #[serde(default)]
     pub root_disk_bus: Option<String>,
+    /// Device type of the root disk (`disk`, `cdrom`, …); unset = `disk`.
+    #[serde(default)]
+    pub root_device_type: Option<String>,
     /// Network ids; empty = let Nova pick (`auto`). Superseded by `nics`.
     #[serde(default)]
     pub networks: Vec<String>,
@@ -340,6 +343,7 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
 
     let root = DiskPlacement {
         disk_bus: req.root_disk_bus.clone(),
+        device_type: req.root_device_type.clone(),
         ..Default::default()
     };
     let mut bdm = Vec::new();
@@ -909,6 +913,26 @@ mod tests {
         let b = build_server(&l, Some(Microversion::new(2, 100))).unwrap();
         assert_eq!(b["server"]["block_device_mapping_v2"][0]["disk_bus"], "ide");
         l.root_disk_bus = Some("floppy-ish".into());
+        assert!(build_server(&l, None).is_err());
+        // Root device type alone (e.g. booting an installer ISO as a CD-ROM).
+        let mut l = base();
+        l.boot_from_volume = false;
+        l.root_device_type = Some("cdrom".into());
+        let b = build_server(&l, Some(Microversion::new(2, 100))).unwrap();
+        let root = &b["server"]["block_device_mapping_v2"][0];
+        assert_eq!(
+            (root["device_type"].as_str(), root["boot_index"].as_i64()),
+            (Some("cdrom"), Some(0))
+        );
+        assert!(root.get("disk_bus").is_none());
+        let mut l = base();
+        l.root_device_type = Some("cdrom".into());
+        let b = build_server(&l, Some(Microversion::new(2, 100))).unwrap();
+        assert_eq!(
+            b["server"]["block_device_mapping_v2"][0]["device_type"],
+            "cdrom"
+        );
+        l.root_device_type = Some("tape".into());
         assert!(build_server(&l, None).is_err());
         let mut l = base();
         l.volumes = vec![ExtraVolume {
