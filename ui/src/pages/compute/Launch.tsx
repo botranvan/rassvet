@@ -110,8 +110,12 @@ const placementBody = (p: Placement) => ({
   disk_bus: p.diskBus || undefined,
   device_type: p.deviceType || undefined,
 });
-/** Size, volume type and the third item (delete / device) of a disk, side by side when there is room. */
-const DISK_FIELDS = "grid items-end gap-3 @lg:grid-cols-[9rem_minmax(0,1fr)_auto]";
+/**
+ * Columns of a data volume row (disk, source, size, type, on delete, options); stacks when the card is narrow.
+ * The header and every row are separate grids, so only the source column may stretch: the others have fixed
+ * widths, or the titles would drift away from their fields.
+ */
+const VOL_GRID = "grid-cols-[3rem_minmax(0,1fr)] @3xl:grid-cols-[3rem_minmax(0,1fr)_7rem_11rem_10.5rem_7.75rem]";
 const DEVICE_NAME = /^(\/dev\/)?[a-z][a-z0-9]{1,15}$/;
 
 let seq = 0;
@@ -617,6 +621,16 @@ export default function Launch() {
           {step === "volumes" && (
             <Card title={tr("Data volumes")} flush actions={<span className="text-xs text-muted">{tr("Attached after the root disk, in this order")}</span>}>
               <div className="@container">
+                {extras.length > 0 && (
+                  <div className={cn(VOL_GRID, "hidden gap-x-3 border-b border-line px-5 py-2 text-xs font-medium text-muted @3xl:grid")}>
+                    <span>{tr("Disk")}</span>
+                    <span>{tr("Source")}</span>
+                    <span>{tr("Size")}</span>
+                    <span>{tr("Volume type")}</span>
+                    <span>{tr("On delete")}</span>
+                    <span className="sr-only">{tr("Options")}</span>
+                  </div>
+                )}
                 <ul>
                   {extras.map((e, i) => {
                     const v = e.kind === "existing" ? volumes.data?.find((x) => x.id === e.id) : undefined;
@@ -624,25 +638,24 @@ export default function Launch() {
                     const guess = `/dev/vd${"bcdefghijklmnopq"[i]}`;
                     const custom = !!(e.deviceName || e.diskBus || e.deviceType);
                     const badName = !!e.deviceName.trim() && !DEVICE_NAME.test(e.deviceName.trim());
-                    const label = (t: string) => <span className="text-xs font-medium text-muted">{t}</span>;
+                    const label = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
                     return (
                       <li key={e.key} className="border-b border-line px-5 py-3 text-sm last:border-0">
-                        {/* Disk, what it is, and its buttons: one line at every width. */}
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span className="grid h-7 w-11 shrink-0 place-items-center rounded-md bg-ink/6 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
+                        <div className={cn(VOL_GRID, "grid items-center gap-x-3 gap-y-2")}>
+                          <span className="grid h-7 w-fit place-items-center rounded-md bg-ink/6 px-2 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
                             {e.deviceName.trim() ? e.deviceName.trim().replace(/^\/dev\//, "") : guess.slice(5)}
                           </span>
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-2 @max-3xl:col-span-full @max-3xl:row-start-2">
                             {e.kind === "existing" ? (
                               <>
-                                <Icon name="hard-drive" className="shrink-0 text-muted" />
+                                <Icon name="hard-drive" className="text-muted" />
                                 <span className="min-w-0">
-                                  <span className="block truncate font-medium" title={v?.name || e.id}>{v?.name || e.id}</span>
+                                  <span className="block truncate font-medium">{v?.name || e.id}</span>
                                   <span className="block text-xs text-muted">{tr("Existing volume")}</span>
                                 </span>
                               </>
                             ) : e.kind === "image" ? (
-                              <div className="min-w-0 flex-1 @xl:max-w-md">
+                              <div className="min-w-0 flex-1">
                                 <Picker
                                   aria-label={tr("Image")}
                                   size="sm"
@@ -666,22 +679,15 @@ export default function Launch() {
                               </div>
                             ) : (
                               <>
-                                <Icon name="plus" className="shrink-0 text-muted" />
-                                <span className="truncate font-medium">{tr("New blank volume")}</span>
+                                <Icon name="plus" className="text-muted" />
+                                <span className="font-medium">{tr("New blank volume")}</span>
                               </>
                             )}
                           </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <DeviceButton open={!!e.open} summary={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : ""} onClick={() => set({ open: !e.open })} />
-                            <IconBtn label={tr("Remove")} icon="x" onClick={() => setExtras((l) => l.filter((x) => x.key !== e.key))} />
-                          </div>
-                        </div>
-                        {/* Size, type and delete-with-instance side by side, under the title. */}
-                        <div className={cn(DISK_FIELDS, "mt-2 @md:pl-14")}>
-                          <div className="flex flex-col gap-1">
+                          <div className="flex flex-col gap-1 @max-3xl:col-span-full">
                             {label(tr("Size"))}
                             {e.kind === "existing" ? (
-                              <span className="flex h-9 items-center tabular-nums">{v ? tr("{size} GiB", { size: v.size }) : "—"}</span>
+                              <span className="tabular-nums">{v ? tr("{size} GiB", { size: v.size }) : "—"}</span>
                             ) : (
                               <div className="relative">
                                 <Input
@@ -696,21 +702,39 @@ export default function Launch() {
                               </div>
                             )}
                           </div>
-                          <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex min-w-0 flex-col gap-1 @max-3xl:col-span-full">
                             {label(tr("Volume type"))}
                             {e.kind === "existing" ? (
-                              <span className="flex h-9 items-center truncate">{v?.volume_type ?? "—"}</span>
+                              <span className="truncate">{v?.volume_type ?? "—"}</span>
                             ) : (
                               <VolumeTypePicker value={e.type || typeFallback} onChange={(t) => set({ type: t } as Partial<Extra>)} types={types.data} size="sm" className="h-9" />
                             )}
                           </div>
-                          <label className="flex h-9 items-center gap-2 text-xs whitespace-nowrap text-muted" title={tr("Delete this volume when the instance is deleted")}>
+                          <label className="flex items-center gap-2 text-xs whitespace-nowrap text-muted @max-3xl:col-span-full" title={tr("Delete this volume when the instance is deleted")}>
                             <input type="checkbox" checked={e.dot} onChange={(ev) => set({ dot: ev.target.checked })} className="size-4 accent-cable" />
                             {tr("Delete with instance")}
                           </label>
+                          <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
+                            <button
+                              type="button"
+                              onClick={() => set({ open: !e.open })}
+                              aria-expanded={!!e.open}
+                              title={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : tr("Device name, bus and type")}
+                              className={cn(
+                                "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
+                                custom ? "bg-cable-soft/60 text-cable" : "text-muted",
+                                e.open && "bg-ink/5",
+                              )}
+                            >
+                              <Icon name="settings" className="size-3.5" />
+                              {tr("Device")}
+                              <Icon name="chevron-down" className={cn("size-3 transition-transform", e.open && "rotate-180")} />
+                            </button>
+                            <IconBtn label={tr("Remove")} icon="x" onClick={() => setExtras((l) => l.filter((x) => x.key !== e.key))} />
+                          </div>
                         </div>
                         {e.open && (
-                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @md:ml-14 @xl:grid-cols-3">
+                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-3 @3xl:ml-[3.75rem]">
                             <Field label={tr("Mount point (device)")} hint={badName ? tr("Use a name like /dev/vdb") : tr("Optional. The hypervisor may still pick its own.")}>
                               {(id) => (
                                 <Input
