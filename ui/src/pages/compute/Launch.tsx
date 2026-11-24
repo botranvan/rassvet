@@ -152,6 +152,7 @@ export default function Launch() {
   const [size, setSize] = useState<number | null>(null);
   const [volumeType, setVolumeType] = useState("");
   const [rootBus, setRootBus] = useState("");
+  const [rootDeviceType, setRootDeviceType] = useState("");
   // "" = not chosen yet: use "__DEFAULT__" or the first type the cloud lists.
   const typeFallback = defaultVolumeType(types.data);
   const rootType = volumeType || typeFallback;
@@ -268,6 +269,7 @@ export default function Launch() {
         volume_type: newVolume ? rootType || undefined : undefined,
         delete_on_termination: deleteOnTerm,
         root_disk_bus: rootBus || undefined,
+        root_device_type: rootDeviceType || undefined,
         flavor_id: flavorId,
         nics: chosenNics.map((n) =>
           n.kind === "network"
@@ -428,13 +430,21 @@ export default function Launch() {
                     </Field>
                   </div>
                 )}
-                <Field label={tr("Root disk bus")} hint={tr("Optional. Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
-                  {(id) => (
-                    <div className="sm:max-w-xs">
-                      <Picker id={id} value={rootBus} onChange={setRootBus} options={DISK_BUSES} />
-                    </div>
-                  )}
-                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={tr("Root disk bus")} hint={tr("Optional. Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
+                    {(id) => <Picker id={id} value={rootBus} onChange={setRootBus} options={DISK_BUSES} />}
+                  </Field>
+                  <Field
+                    label={tr("Root device type")}
+                    hint={
+                      image?.disk_format === "iso" && !rootDeviceType
+                        ? tr("This is an ISO image: choose cdrom to boot it as an installer disc.")
+                        : tr("Optional. Like the data volumes' device type; Default is disk.")
+                    }
+                  >
+                    {(id) => <Picker id={id} value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} />}
+                  </Field>
+                </div>
                 {kind !== "image" || bfv ? (
                   <Switch
                     checked={deleteOnTerm}
@@ -823,6 +833,7 @@ export default function Launch() {
                   )}
                   {kind === "image" && !bfv && <span className="text-muted">{" "}{tr("on local disk")}</span>}
                   {rootBus && <span className="text-muted">{trx(", {rootBus} bus", { rootBus })}</span>}
+                  {rootDeviceType && <span className="text-muted">{trx(", as {rootDeviceType}", { rootDeviceType })}</span>}
                 </Row>
                 <Row label={tr("Flavor")} problem={problems.flavor} go={() => setStep("flavor")}>
                   {flavor ? tr("{name} ({vcpus} vCPU, {ram})", { name: flavor.name, vcpus: flavor.vcpus, ram: gib(flavor.ram) }) : "—"}

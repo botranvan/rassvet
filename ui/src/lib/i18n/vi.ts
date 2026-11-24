@@ -4890,6 +4890,10 @@ const vi: Record<string, string> = {
   "routes": "route",
   "Routes ({length})": "Route ({length})",
   "Traffic to {v} no longer goes to {v2}.": "Lưu lượng đến {v} không còn đi qua {v2}.",
+  "Root device type": "Kiểu thiết bị của đĩa gốc",
+  "This is an ISO image: choose cdrom to boot it as an installer disc.": "Đây là image ISO: chọn cdrom để khởi động nó như một đĩa cài đặt.",
+  "Optional. Like the data volumes' device type; Default is disk.": "Tuỳ chọn. Giống kiểu thiết bị của các volume dữ liệu; Mặc định là disk.",
+  ", as {rootDeviceType}": ", dạng {rootDeviceType}",
 };
 
 export default vi;
