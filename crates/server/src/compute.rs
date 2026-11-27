@@ -137,8 +137,47 @@ pub struct ExtraVolume {
     pub volume_type: Option<String>,
     #[serde(default)]
     pub delete_on_termination: bool,
+    /// Place in the boot order (0 boots first, negative = never booted from); unset = the
+    /// next free place after the disks before it.
+    #[serde(default)]
+    pub boot_index: Option<i32>,
     #[serde(flatten)]
     pub placement: DiskPlacement,
+}
+
+/// The boot order of the disks, root disk first. Disks without a requested place take the
+/// lowest free ones, in order; the places must then run 0, 1, 2… (Nova rejects gaps and
+/// duplicates). Negative means "never boot from this disk" and becomes -1.
+fn boot_indexes(requested: &[Option<i32>]) -> Result<Vec<i32>, ApiError> {
+    let mut used = std::collections::BTreeSet::new();
+    for i in requested.iter().flatten().filter(|i| **i >= 0) {
+        if !used.insert(*i) {
+            return Err(bad(format!("two disks have the boot order {i}")));
+        }
+    }
+    let mut next = 0;
+    let out: Vec<i32> = requested
+        .iter()
+        .map(|r| match r {
+            Some(i) => (*i).max(-1),
+            None => {
+                while used.contains(&next) {
+                    next += 1;
+                }
+                used.insert(next);
+                next
+            }
+        })
+        .collect();
+    if !used.contains(&0) {
+        return Err(bad("one disk needs the boot order 0 to boot from"));
+    }
+    if used.iter().copied().ne(0..used.len() as i32) {
+        return Err(bad(
+            "the boot order must run 0, 1, 2… without gaps (use -1 for a disk that is never booted from)",
+        ));
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +204,9 @@ pub struct Launch {
     /// Device type of the root disk (`disk`, `cdrom`, …); unset = `disk`.
     #[serde(default)]
     pub root_device_type: Option<String>,
+    /// Place of the root disk in the boot order; unset = the first free one (normally 0).
+    #[serde(default)]
+    pub root_boot_index: Option<i32>,
     /// Network ids; empty = let Nova pick (`auto`). Superseded by `nics`.
     #[serde(default)]
     pub networks: Vec<String>,
@@ -346,12 +388,28 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
         device_type: req.root_device_type.clone(),
         ..Default::default()
     };
+    // A local root disk is the image Nova boots (imageRef): always first.
+    let local_root = req.source == SourceKind::Image && !req.boot_from_volume;
+    if local_root && req.root_boot_index.is_some_and(|i| i != 0) {
+        return Err(bad(
+            "a root disk on the hypervisor's local disk always boots first; boot from a volume to change its boot order",
+        ));
+    }
+    let order = boot_indexes(
+        &std::iter::once(if local_root {
+            Some(0)
+        } else {
+            req.root_boot_index
+        })
+        .chain(req.volumes.iter().map(|v| v.boot_index))
+        .collect::<Vec<_>>(),
+    )?;
     let mut bdm = Vec::new();
     let mut image_ref = None;
     match req.source {
         SourceKind::Image if req.boot_from_volume => {
             let mut d = json!({
-                "boot_index": 0,
+                "boot_index": order[0],
                 "uuid": req.source_id,
                 "source_type": "image",
                 "destination_type": "volume",
@@ -370,7 +428,7 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
         }
         SourceKind::Image => image_ref = Some(req.source_id.clone()),
         SourceKind::Volume => bdm.push(json!({
-            "boot_index": 0,
+            "boot_index": order[0],
             "uuid": req.source_id,
             "source_type": "volume",
             "destination_type": "volume",
@@ -378,7 +436,7 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
         })),
         SourceKind::VolumeSnapshot => {
             let mut d = json!({
-                "boot_index": 0,
+                "boot_index": order[0],
                 "uuid": req.source_id,
                 "source_type": "snapshot",
                 "destination_type": "volume",
@@ -398,8 +456,8 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
         root.apply(boot)?;
     }
 
-    // Data volumes follow the root disk (boot_index 0) in the wizard's order: 1, 2, 3…
-    // (Nova wants the indexes to run from 0 without gaps).
+    // Data volumes follow the root disk in the wizard's order (1, 2, 3… unless the request
+    // sets the boot order itself; see `boot_indexes`).
     for (i, v) in req.volumes.iter().enumerate() {
         let mut d = match (&v.volume_id, &v.image_id, v.size) {
             (Some(id), _, _) => {
@@ -416,7 +474,7 @@ pub fn build_server(req: &Launch, mv: Option<Microversion>) -> Result<Value, Api
             _ => return Err(bad("each extra volume needs an existing volume, or a size")),
         };
         v.placement.apply(&mut d)?;
-        d["boot_index"] = json!(i + 1);
+        d["boot_index"] = json!(order[i + 1]);
         d["delete_on_termination"] = json!(v.delete_on_termination);
         if v.volume_id.is_none()
             && let Some(t) = v.volume_type.as_deref().filter(|t| !t.is_empty())
@@ -886,6 +944,54 @@ mod tests {
             .collect();
         assert_eq!(order, [0, 1, 2]);
         assert_eq!(b["server"]["imageRef"], "img-1");
+
+        // A chosen boot order: the others take the free places, in order.
+        let mut l = base();
+        l.volumes = vec![
+            ExtraVolume {
+                size: Some(1),
+                boot_index: Some(0),
+                ..Default::default()
+            },
+            ExtraVolume {
+                size: Some(1),
+                ..Default::default()
+            },
+            ExtraVolume {
+                size: Some(1),
+                boot_index: Some(-5),
+                ..Default::default()
+            },
+        ];
+        let order = |l: &Launch| -> Result<Vec<i64>, ApiError> {
+            Ok(build_server(l, Some(Microversion::new(2, 100)))?["server"]["block_device_mapping_v2"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| d["boot_index"].as_i64().unwrap())
+                .collect())
+        };
+        assert_eq!(order(&l).unwrap(), [1, 0, 2, -1]);
+        l.root_boot_index = Some(0); // twice 0
+        assert!(order(&l).is_err());
+        l.root_boot_index = Some(3); // gap: 0, 1, 3
+        assert!(order(&l).is_err());
+        l.root_boot_index = Some(-1);
+        l.volumes[0].boot_index = Some(-1); // nothing to boot from
+        l.volumes[1].boot_index = Some(-1);
+        assert!(order(&l).is_err());
+        // The local root disk stays first.
+        let mut l = base();
+        l.boot_from_volume = false;
+        l.volumes = vec![ExtraVolume {
+            size: Some(1),
+            boot_index: Some(0),
+            ..Default::default()
+        }];
+        assert!(order(&l).is_err());
+        l.volumes[0].boot_index = None;
+        l.root_boot_index = Some(1);
+        assert!(order(&l).is_err());
 
         // Disk placement: device name, bus, type; root bus.
         let mut l = base();

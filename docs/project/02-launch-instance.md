@@ -52,6 +52,8 @@ The launch wizard walks you through every choice and shows the quota impact befo
 
 7. **Data volumes** (optional) — add a **New blank volume**, a volume **From image (ISO…)** or
    **Attach an existing volume**. They are attached after the root disk, in order.
+   The disks boot in that order too (root disk 0, then 1, 2…); to change it, open **Device** on a disk
+   (here or on the root disk in **Source**) and set its **Boot order**. An empty field shows the automatic value.
 
 8. **Scheduling** (optional) — put the instance in a **Server group** (affinity / anti-affinity), keep it away
    from or together with other instances, or add custom scheduler hints.

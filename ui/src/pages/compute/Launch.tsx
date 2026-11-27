@@ -79,7 +79,7 @@ function imageMinGb(img?: Image) {
  */
 type Nic = { key: string; kind: "network"; id: string; fixedIp: string; sgs: string[] } | { key: string; kind: "port"; id: string; sgs: string[] };
 /** Where a disk shows up in the guest; empty fields are left to Nova. */
-type Placement = { deviceName: string; diskBus: string; deviceType: string; open?: boolean };
+type Placement = { deviceName: string; diskBus: string; deviceType: string; bootIndex: string; open?: boolean };
 /** One data volume: an existing one, a new blank one, or a new one from an image (ISO…). */
 type Extra = Placement &
   (
@@ -87,7 +87,36 @@ type Extra = Placement &
     | { key: string; kind: "new"; size: number; type: string; dot: boolean }
     | { key: string; kind: "image"; imageId: string; size: number; type: string; dot: boolean }
   );
-const NO_PLACEMENT: Placement = { deviceName: "", diskBus: "", deviceType: "" };
+const NO_PLACEMENT: Placement = { deviceName: "", diskBus: "", deviceType: "", bootIndex: "" };
+
+/** A typed boot order: null = automatic, negative = never boot from the disk (-1). */
+const parseBoot = (s: string) => (s.trim() === "" || !Number.isInteger(Number(s)) ? null : Math.max(-1, Number(s)));
+/**
+ * The boot order of the disks, root disk first (as the server works it out): disks without a
+ * chosen place take the lowest free ones, in order. `problem` when Nova would refuse the result.
+ */
+function bootOrder(requested: (number | null)[]) {
+  const chosen = requested.filter((r): r is number => r != null && r >= 0);
+  const used = new Set(chosen);
+  let next = 0;
+  const order = requested.map((r) => {
+    if (r != null) return r;
+    while (used.has(next)) next++;
+    used.add(next);
+    return next;
+  });
+  const dup = chosen.find((r, i) => chosen.indexOf(r) !== i);
+  const problem =
+    dup != null
+      ? tr("Two disks have the boot order {dup}", { dup })
+      : !used.has(0)
+        ? tr("One disk needs the boot order 0 to boot from")
+        : [...used].some((r) => r >= used.size)
+          ? tr("The boot order must run 0, 1, 2… without gaps (-1 = never boot from the disk)")
+          : null;
+  return { order, problem };
+}
+const BOOT_HINT = () => tr("0 boots first, -1 never. Empty = automatic.");
 
 const DISK_BUSES = [
   { value: "", label: tr("Default"), description: tr("Let Nova and the image decide") },
@@ -157,6 +186,7 @@ export default function Launch() {
   const [volumeType, setVolumeType] = useState("");
   const [rootBus, setRootBus] = useState("");
   const [rootDeviceType, setRootDeviceType] = useState("");
+  const [rootBoot, setRootBoot] = useState("");
   const [rootOpen, setRootOpen] = useState(false);
   // "" = not chosen yet: use "__DEFAULT__" or the first type the cloud lists.
   const typeFallback = defaultVolumeType(types.data);
@@ -198,6 +228,9 @@ export default function Launch() {
   /** The root disk row (Source step), like a data volume's. */
   const rootName = image?.name || volume?.name || snap?.name || (sourceId && kind !== "image" ? sourceId : "");
   const rootDevice = rootBus === "ide" ? "hda" : rootBus === "scsi" || rootBus === "sata" || rootBus === "usb" ? "sda" : "vda";
+  // A local root disk is the image Nova boots: always first.
+  const localRoot = kind === "image" && !bfv;
+  const boot = bootOrder([localRoot ? 0 : parseBoot(rootBoot), ...extras.map((e) => parseBoot(e.bootIndex))]);
   const rootLabel = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
   // Image properties the guest gets (vTPM, memory encryption…): the image's, or the boot volume's copy.
   const imageProps: Record<string, unknown> = image ?? volume?.volume_image_metadata ?? {};
@@ -263,6 +296,10 @@ export default function Launch() {
   else if (extras.some((e) => e.kind === "image" && !e.imageId)) problems.volumes = tr("Choose an image for every volume made from one");
   else if (extras.some((e) => e.deviceName.trim() && !DEVICE_NAME.test(e.deviceName.trim()))) problems.volumes = tr("Device names look like /dev/vdb");
   else if (newGb * count > gbLeft) problems.volumes = tr("Only {gbLeft} GiB of volume quota left", { gbLeft });
+  if (boot.problem) {
+    const at = extras.some((e) => parseBoot(e.bootIndex) != null) ? "volumes" : "source";
+    problems[at] ??= boot.problem;
+  }
 
   if (schedulingProblem(scheduling)) problems.scheduling = schedulingProblem(scheduling)!;
   if (Object.keys(metaErrors).length) problems.config = `Metadata: ${Object.entries(metaErrors)[0].join(" – ")}`;
@@ -284,14 +321,16 @@ export default function Launch() {
         delete_on_termination: deleteOnTerm,
         root_disk_bus: rootBus || undefined,
         root_device_type: rootDeviceType || undefined,
+        root_boot_index: boot.order[0],
         flavor_id: flavorId,
         nics: chosenNics.map((n) =>
           n.kind === "network"
             ? { network_id: n.id, fixed_ip: n.fixedIp.trim() || undefined, security_groups: n.sgs.length ? n.sgs : undefined }
             : { port_id: n.id, security_groups: n.sgs },
         ),
-        volumes: extras.map((e) => ({
+        volumes: extras.map((e, i) => ({
           ...placementBody(e),
+          boot_index: boot.order[i + 1],
           delete_on_termination: e.dot,
           ...(e.kind === "existing"
             ? { volume_id: e.id }
@@ -503,7 +542,7 @@ export default function Launch() {
                       </span>
                     )}
                     <div className="flex items-center justify-end gap-1 @max-3xl:col-start-2 @max-3xl:row-start-1">
-                      <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
+                      <DeviceButton open={rootOpen} summary={[rootBus, rootDeviceType, !localRoot && parseBoot(rootBoot) != null && tr("boot order {n}", { n: boot.order[0] })].filter(Boolean).join(" · ")} onClick={() => setRootOpen((o) => !o)} />
                     </div>
                   </div>
                   {newVolume && (
@@ -512,7 +551,7 @@ export default function Launch() {
                     </p>
                   )}
                   {rootOpen && (
-                    <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-2 @3xl:ml-[3.75rem]">
+                    <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-3 @3xl:ml-[3.75rem]">
                       <Field label={tr("Disk bus")} hint={tr("Leave on Default unless the guest needs a specific controller (e.g. no virtio drivers).")}>
                         {(id) => <Picker id={id} size="sm" className="h-9" value={rootBus} onChange={setRootBus} options={DISK_BUSES} panelWidth={300} />}
                       </Field>
@@ -525,6 +564,21 @@ export default function Launch() {
                         }
                       >
                         {(id) => <Picker id={id} size="sm" className="h-9" value={rootDeviceType} onChange={setRootDeviceType} options={DEVICE_TYPES} panelWidth={300} />}
+                      </Field>
+                      <Field label={tr("Boot order")} hint={localRoot ? tr("A local root disk always boots first. Boot from a volume to change it.") : BOOT_HINT()}>
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            min={-1}
+                            step={1}
+                            disabled={localRoot}
+                            value={localRoot ? "" : rootBoot}
+                            onChange={(e) => setRootBoot(e.target.value)}
+                            placeholder={String(boot.order[0])}
+                            className="h-9 tabular-nums"
+                          />
+                        )}
                       </Field>
                     </div>
                   )}
@@ -676,7 +730,8 @@ export default function Launch() {
                     const v = e.kind === "existing" ? volumes.data?.find((x) => x.id === e.id) : undefined;
                     const set = (patch: Partial<Extra>) => setExtras((l) => l.map((x) => (x.key === e.key ? ({ ...x, ...patch } as Extra) : x)));
                     const guess = `/dev/vd${"bcdefghijklmnopq"[i]}`;
-                    const custom = !!(e.deviceName || e.diskBus || e.deviceType);
+                    const ownBoot = parseBoot(e.bootIndex) != null;
+                    const custom = !!(e.deviceName || e.diskBus || e.deviceType || ownBoot);
                     const badName = !!e.deviceName.trim() && !DEVICE_NAME.test(e.deviceName.trim());
                     const label = (t: string) => <span className="text-xs font-medium text-muted @3xl:hidden">{t}</span>;
                     return (
@@ -763,7 +818,7 @@ export default function Launch() {
                               type="button"
                               onClick={() => set({ open: !e.open })}
                               aria-expanded={!!e.open}
-                              title={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" · ") : tr("Device name, bus and type")}
+                              title={custom ? [e.deviceName.trim(), e.diskBus, e.deviceType, ownBoot && tr("boot order {n}", { n: boot.order[i + 1] })].filter(Boolean).join(" · ") : tr("Device name, bus, type and boot order")}
                               className={cn(
                                 "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
                                 custom ? "bg-cable-soft/60 text-cable" : "text-muted",
@@ -778,7 +833,7 @@ export default function Launch() {
                           </div>
                         </div>
                         {e.open && (
-                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-3 @3xl:ml-[3.75rem]">
+                          <div className="mt-3 grid animate-fade-in gap-3 rounded-lg border border-line bg-surface/40 p-3 @xl:grid-cols-2 @4xl:grid-cols-4 @3xl:ml-[3.75rem]">
                             <Field label={tr("Mount point (device)")} hint={badName ? tr("Use a name like /dev/vdb") : tr("Optional. The hypervisor may still pick its own.")}>
                               {(id) => (
                                 <Input
@@ -794,6 +849,20 @@ export default function Launch() {
                             <Field label={tr("Disk bus")}>{(id) => <Picker id={id} size="sm" className="h-9" value={e.diskBus} onChange={(b) => set({ diskBus: b })} options={DISK_BUSES} panelWidth={300} />}</Field>
                             <Field label={tr("Device type")}>
                               {(id) => <Picker id={id} size="sm" className="h-9" value={e.deviceType} onChange={(t) => set({ deviceType: t })} options={DEVICE_TYPES} panelWidth={300} />}
+                            </Field>
+                            <Field label={tr("Boot order")} hint={BOOT_HINT()}>
+                              {(id) => (
+                                <Input
+                                  id={id}
+                                  type="number"
+                                  min={-1}
+                                  step={1}
+                                  value={e.bootIndex}
+                                  onChange={(ev) => set({ bootIndex: ev.target.value })}
+                                  placeholder={String(boot.order[i + 1])}
+                                  className="h-9 tabular-nums"
+                                />
+                              )}
                             </Field>
                           </div>
                         )}
@@ -908,12 +977,14 @@ export default function Launch() {
                   {image ? image.name : volume ? volume.name || volume.id : snap ? snap.name || snap.id : "—"}
                   {newVolume && (
                     <span className="text-muted">
+                      {" "}
                       {trx("on a new {rootSize} GiB {v} volume{v2}", { rootSize, v: rootType || tr("default"), v2: deleteOnTerm ? tr(", deleted with the instance") : tr(", kept after deletion") })}
                     </span>
                   )}
                   {kind === "image" && !bfv && <span className="text-muted">{" "}{tr("on local disk")}</span>}
                   {rootBus && <span className="text-muted">{trx(", {rootBus} bus", { rootBus })}</span>}
                   {rootDeviceType && <span className="text-muted">{trx(", as {rootDeviceType}", { rootDeviceType })}</span>}
+                  {!localRoot && parseBoot(rootBoot) != null && <span className="text-muted">{tr(", boot order {n}", { n: boot.order[0] })}</span>}
                 </Row>
                 <Row label={tr("Flavor")} problem={problems.flavor} go={() => setStep("flavor")}>
                   {flavor ? tr("{name} ({vcpus} vCPU, {ram})", { name: flavor.name, vcpus: flavor.vcpus, ram: gib(flavor.ram) }) : "—"}
@@ -939,7 +1010,7 @@ export default function Launch() {
                 </Row>
                 <Row label={tr("Data volumes")} problem={problems.volumes} go={() => setStep("volumes")}>
                   {extras
-                    .map((e) => {
+                    .map((e, i) => {
                       const what =
                         e.kind === "new"
                           ? tr("new {size} GiB {v}", { size: e.size, v: e.type || typeFallback }).trim()
@@ -947,7 +1018,8 @@ export default function Launch() {
                             ? tr("{v} ({size} GiB {v2})", { v: images.data?.find((i) => i.id === e.imageId)?.name ?? tr("image"), size: e.size, v2: e.type || typeFallback })
                             : volumes.data?.find((v) => v.id === e.id)?.name || e.id;
                       const where = [e.deviceName.trim(), e.diskBus, e.deviceType].filter(Boolean).join(" ");
-                      return where ? `${what} as ${where}` : what;
+                      const order = parseBoot(e.bootIndex) != null ? tr(", boot order {n}", { n: boot.order[i + 1] }) : "";
+                      return (where ? `${what} as ${where}` : what) + order;
                     })
                     .join(", ") || tr("None")}
                 </Row>
@@ -1334,7 +1406,7 @@ function DeviceButton({ open, summary, onClick }: { open: boolean; summary: stri
       type="button"
       onClick={onClick}
       aria-expanded={open}
-      title={summary || tr("Device name, bus and type")}
+      title={summary || tr("Device name, bus, type and boot order")}
       className={cn(
         "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors hover:bg-ink/5",
         summary ? "bg-cable-soft/60 text-cable" : "text-muted",
@@ -1408,7 +1480,16 @@ function Row({ label, children, problem, go }: { label: string; children: ReactN
     <div className="grid grid-cols-[8.5rem_minmax(0,1fr)_auto] items-start gap-3 border-b border-line py-2.5 last:border-0">
       <dt className="text-muted">{label}</dt>
       <dd className="min-w-0">
-        <span className="block truncate">{children}</span>
+        {/* The whole text on hover when it doesn't fit. */}
+        <span
+          className="block truncate"
+          onMouseEnter={(e) => {
+            const el = e.currentTarget;
+            el.title = el.scrollWidth > el.clientWidth ? (el.textContent ?? "") : "";
+          }}
+        >
+          {children}
+        </span>
         {problem && <span className="block text-xs text-[#9a6412] dark:text-led-amber">{problem}</span>}
       </dd>
       <button type="button" onClick={go} className="text-xs text-cable hover:underline">
