@@ -146,6 +146,24 @@ const placementBody = (p: Placement) => ({
  */
 const VOL_GRID = "grid-cols-[3rem_minmax(0,1fr)] @3xl:grid-cols-[3rem_minmax(0,1fr)_7rem_11rem_10.5rem_7.75rem]";
 const DEVICE_NAME = /^(\/dev\/)?[a-z][a-z0-9]{1,15}$/;
+/** How the guest names the disks of a bus: vdX, sdX, hdX, fdX. */
+const devPrefix = (bus: string) => (bus === "ide" ? "hd" : bus === "scsi" || bus === "sata" || bus === "usb" ? "sd" : bus === "fdc" ? "fd" : "vd");
+/**
+ * The likely device name of every disk, root disk first. Each bus counts on its own (a scsi root
+ * disk is sda, the first virtio data volume then vda, the next vdb…); names typed by the user
+ * are kept and skipped by the others.
+ */
+function deviceNames(disks: { bus: string; name?: string }[], defaultBus: string) {
+  const bare = (n?: string) => (n ?? "").trim().replace(/^\/dev\//, "");
+  const used = new Set(disks.map((d) => bare(d.name)).filter(Boolean));
+  return disks.map((d) => {
+    if (bare(d.name)) return bare(d.name);
+    const prefix = devPrefix(d.bus || defaultBus);
+    const letter = [..."abcdefghijklmnopqrstuvwxyz"].find((c) => !used.has(prefix + c)) ?? "?";
+    used.add(prefix + letter);
+    return prefix + letter;
+  });
+}
 
 let seq = 0;
 const nextKey = () => `k${++seq}`;
@@ -227,7 +245,6 @@ export default function Launch() {
   const flavor = flavors.data?.find((f) => f.id === flavorId);
   /** The root disk row (Source step), like a data volume's. */
   const rootName = image?.name || volume?.name || snap?.name || (sourceId && kind !== "image" ? sourceId : "");
-  const rootDevice = rootBus === "ide" ? "hda" : rootBus === "scsi" || rootBus === "sata" || rootBus === "usb" ? "sda" : "vda";
   // A local root disk is the image Nova boots: always first.
   const localRoot = kind === "image" && !bfv;
   const boot = bootOrder([localRoot ? 0 : parseBoot(rootBoot), ...extras.map((e) => parseBoot(e.bootIndex))]);
@@ -235,6 +252,9 @@ export default function Launch() {
   // Image properties the guest gets (vTPM, memory encryption…): the image's, or the boot volume's copy.
   const imageProps: Record<string, unknown> = image ?? volume?.volume_image_metadata ?? {};
   const features = guestFeatures(flavor?.extra_specs, imageProps);
+  // Disks on the Default bus use the image's (hw_disk_bus), else virtio.
+  const defaultBus = typeof imageProps.hw_disk_bus === "string" ? imageProps.hw_disk_bus : "virtio";
+  const [rootDevice, ...extraDevices] = deviceNames([{ bus: rootBus }, ...extras.map((e) => ({ bus: e.diskBus, name: e.deviceName }))], defaultBus);
 
   // Networks the project can attach to (own + shared), external ones last.
   const usableNets = attachableNetworks(networks.data, session.project?.id);
@@ -729,7 +749,7 @@ export default function Launch() {
                   {extras.map((e, i) => {
                     const v = e.kind === "existing" ? volumes.data?.find((x) => x.id === e.id) : undefined;
                     const set = (patch: Partial<Extra>) => setExtras((l) => l.map((x) => (x.key === e.key ? ({ ...x, ...patch } as Extra) : x)));
-                    const guess = `/dev/vd${"bcdefghijklmnopq"[i]}`;
+                    const guess = `/dev/${extraDevices[i]}`;
                     const ownBoot = parseBoot(e.bootIndex) != null;
                     const custom = !!(e.deviceName || e.diskBus || e.deviceType || ownBoot);
                     const badName = !!e.deviceName.trim() && !DEVICE_NAME.test(e.deviceName.trim());
@@ -738,7 +758,7 @@ export default function Launch() {
                       <li key={e.key} className="border-b border-line px-5 py-3 text-sm last:border-0">
                         <div className={cn(VOL_GRID, "grid items-center gap-x-3 gap-y-2")}>
                           <span className="grid h-7 w-fit place-items-center rounded-md bg-ink/6 px-2 font-mono text-[12px]" title={tr("Device name in the guest (may differ)")}>
-                            {e.deviceName.trim() ? e.deviceName.trim().replace(/^\/dev\//, "") : guess.slice(5)}
+                            {extraDevices[i]}
                           </span>
                           <div className="flex min-w-0 items-center gap-2 @max-3xl:col-span-full @max-3xl:row-start-2">
                             {e.kind === "existing" ? (
