@@ -47,10 +47,7 @@ impl LoginThrottle {
         }
         e.0 += 1;
         if e.0 == MAX_FAILURES {
-            tracing::warn!(
-                account = key,
-                "too many failed sign-ins; refusing new attempts for a while"
-            );
+            tracing::warn!(account = key, "too many failed sign-ins; refusing new attempts for a while");
         }
     }
 
@@ -88,10 +85,7 @@ mod tests {
         t.failure(&k);
         let wait = t.retry_after(&k).unwrap();
         assert!(wait > 0 && wait <= WINDOW.as_secs());
-        assert!(
-            t.retry_after(&password_key("lab", "Default", "bob"))
-                .is_none()
-        );
+        assert!(t.retry_after(&password_key("lab", "Default", "bob")).is_none());
         t.success(&k);
         assert!(t.retry_after(&k).is_none());
     }
