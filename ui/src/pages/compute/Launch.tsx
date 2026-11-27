@@ -149,16 +149,31 @@ const DEVICE_NAME = /^(\/dev\/)?[a-z][a-z0-9]{1,15}$/;
 /** How the guest names the disks of a bus: vdX, sdX, hdX, fdX. */
 const devPrefix = (bus: string) => (bus === "ide" ? "hd" : bus === "scsi" || bus === "sata" || bus === "usb" ? "sd" : bus === "fdc" ? "fd" : "vd");
 /**
+ * The bus Nova (libvirt) gives a disk left on Default: the boot image's hw_disk_bus /
+ * hw_cdrom_bus / hw_floppy_bus, else virtio for disks, fdc for floppies and, for CD-ROMs,
+ * ide (sata on q35 machines, scsi on non-x86 guests).
+ */
+function defaultBus(deviceType: string, imageProps: Record<string, unknown>) {
+  const prop = (k: string) => (typeof imageProps[k] === "string" && imageProps[k] ? (imageProps[k] as string).toLowerCase() : "");
+  if (deviceType === "cdrom") {
+    if (prop("hw_cdrom_bus")) return prop("hw_cdrom_bus");
+    if (/^(aarch64|arm|ppc|s390)/.test(prop("hw_architecture") || prop("architecture"))) return "scsi";
+    return prop("hw_machine_type").includes("q35") ? "sata" : "ide";
+  }
+  if (deviceType === "floppy") return prop("hw_floppy_bus") || "fdc";
+  return prop("hw_disk_bus") || "virtio";
+}
+/**
  * The likely device name of every disk, root disk first. Each bus counts on its own (a scsi root
  * disk is sda, the first virtio data volume then vda, the next vdb…); names typed by the user
  * are kept and skipped by the others.
  */
-function deviceNames(disks: { bus: string; name?: string }[], defaultBus: string) {
+function deviceNames(disks: { bus: string; name?: string }[]) {
   const bare = (n?: string) => (n ?? "").trim().replace(/^\/dev\//, "");
   const used = new Set(disks.map((d) => bare(d.name)).filter(Boolean));
   return disks.map((d) => {
     if (bare(d.name)) return bare(d.name);
-    const prefix = devPrefix(d.bus || defaultBus);
+    const prefix = devPrefix(d.bus);
     const letter = [..."abcdefghijklmnopqrstuvwxyz"].find((c) => !used.has(prefix + c)) ?? "?";
     used.add(prefix + letter);
     return prefix + letter;
@@ -252,9 +267,10 @@ export default function Launch() {
   // Image properties the guest gets (vTPM, memory encryption…): the image's, or the boot volume's copy.
   const imageProps: Record<string, unknown> = image ?? volume?.volume_image_metadata ?? {};
   const features = guestFeatures(flavor?.extra_specs, imageProps);
-  // Disks on the Default bus use the image's (hw_disk_bus), else virtio.
-  const defaultBus = typeof imageProps.hw_disk_bus === "string" ? imageProps.hw_disk_bus : "virtio";
-  const [rootDevice, ...extraDevices] = deviceNames([{ bus: rootBus }, ...extras.map((e) => ({ bus: e.diskBus, name: e.deviceName }))], defaultBus);
+  const [rootDevice, ...extraDevices] = deviceNames([
+    { bus: rootBus || defaultBus(rootDeviceType, imageProps) },
+    ...extras.map((e) => ({ bus: e.diskBus || defaultBus(e.deviceType, imageProps), name: e.deviceName })),
+  ]);
 
   // Networks the project can attach to (own + shared), external ones last.
   const usableNets = attachableNetworks(networks.data, session.project?.id);
